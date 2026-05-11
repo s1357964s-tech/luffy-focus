@@ -78,6 +78,80 @@ class StorageService {
     await _prefs.setInt(_storyIndexKey, (currentIndex + 1) % totalStories);
   }
 
+  // ==================== 統計相關方法 ====================
+
+  /// 判斷兩個 DateTime 是否為同一天
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  /// 取得指定日期的專注次數
+  int getFocusCountForDate(DateTime date) {
+    return focusHistory.where((r) => _isSameDay(r.completedAt, date)).length;
+  }
+
+  /// 取得指定日期的專注總分鐘數（每次 25 分鐘）
+  int getFocusMinutesForDate(DateTime date) {
+    return getFocusCountForDate(date) * 25;
+  }
+
+  /// 取得最近 7 天的每日專注次數
+  /// 回傳一個長度為 7 的 List，索引 0 = 6 天前，索引 6 = 今天
+  List<int> getLast7DaysFocusCounts() {
+    final today = DateTime.now();
+    return List.generate(7, (i) {
+      final date = today.subtract(Duration(days: 6 - i));
+      return getFocusCountForDate(date);
+    });
+  }
+
+  /// 取得最近 7 天對應的星期標籤（例如 ["一", "二", ...]）
+  List<String> getLast7DaysLabels() {
+    const weekdays = ['一', '二', '三', '四', '五', '六', '日'];
+    final today = DateTime.now();
+    return List.generate(7, (i) {
+      final date = today.subtract(Duration(days: 6 - i));
+      return weekdays[date.weekday - 1];
+    });
+  }
+
+  /// 取得本週（週一至今天）的總專注次數與分鐘數
+  ({int count, int minutes}) getThisWeekSummary() {
+    final now = DateTime.now();
+    // 找到本週一的日期
+    final monday = now.subtract(Duration(days: now.weekday - 1));
+    final mondayStart = DateTime(monday.year, monday.month, monday.day);
+
+    final weekRecords = focusHistory
+        .where((r) => r.completedAt.isAfter(mondayStart) || _isSameDay(r.completedAt, mondayStart))
+        .toList();
+
+    final count = weekRecords.length;
+    return (count: count, minutes: count * 25);
+  }
+
+  /// 計算連續專注天數（Streak）
+  /// 從今天（或昨天，若今天尚未完成）往回推，連續有完成紀錄的天數
+  int getCurrentStreak() {
+    final today = DateTime.now();
+    int streak = 0;
+
+    // 先檢查今天是否有紀錄，若有則從今天開始算
+    // 若沒有，從昨天開始算（允許當天尚未完成但 streak 不中斷）
+    int startOffset = getFocusCountForDate(today) > 0 ? 0 : 1;
+
+    for (int i = startOffset; i < 365; i++) {
+      final date = today.subtract(Duration(days: i));
+      if (getFocusCountForDate(date) > 0) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  }
+
   // (可選) 重置次數，開發測試用
   Future<void> resetFocusCount() async {
     await _prefs.remove(_focusCountKey);

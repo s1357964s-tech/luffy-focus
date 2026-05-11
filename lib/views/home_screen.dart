@@ -5,6 +5,7 @@ import '../viewmodels/timer_provider.dart';
 import '../services/notification_service.dart';
 import 'widgets/reward_modal.dart';
 import 'history_screen.dart';
+import 'statistics_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -73,30 +74,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// 展示通知權限的說明彈窗
   /// 用可愛的路飛口吻解釋為什麼需要通知權限
   Future<bool?> _showNotificationExplanationDialog() {
-    return showDialog<bool>(
+    return showModalBottomSheet<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            const Icon(
-              Icons.notifications_active,
-              color: AppConstants.primaryButtonColor,
-              size: 28,
-            ),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text(
-                '路飛想守護你的專注！',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
         ),
-        content: const Column(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
+            Row(
+              children: [
+                const Icon(
+                  Icons.notifications_active,
+                  color: AppConstants.primaryButtonColor,
+                  size: 28,
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    '路飛想守護你的專注！',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
               '🐶 汪！我是路飛～\n\n'
               '如果你在專注的時候偷偷跑去滑手機，我會發一條通知提醒你回來喔！\n\n'
               '畢竟...我都這麼努力在幫你守護專注時間了，你可不能辜負我的一片苦心呀！',
@@ -106,21 +115,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 color: AppConstants.primaryTextColor,
               ),
             ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: Text(
+                      '先不用了',
+                      style: TextStyle(color: Colors.grey.shade500),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 2,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('好的，讓路飛守護我！'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              '先不用了',
-              style: TextStyle(color: Colors.grey.shade500),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('好的，讓路飛守護我！'),
-          ),
-        ],
       ),
     );
   }
@@ -136,6 +155,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _showRewardModal(context, timerProvider);
       });
     }
+    
+    // 監聽狀態變化，若變成 failed，則彈出失敗提醒
+    if (_previousState == TimerState.running && state == TimerState.failed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showFailureDialog(context, timerProvider);
+      });
+    }
     _previousState = state;
 
     return Scaffold(
@@ -145,47 +171,84 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-              child: Align(
-                alignment: Alignment.topRight,
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const HistoryScreen()),
-                    );
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppConstants.primaryButtonColor.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.auto_stories,
-                          size: 18,
-                          color: AppConstants.primaryButtonColor,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '已專注: ${timerProvider.focusCount} 次',
-                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // 左側：統計入口
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const StatisticsScreen()),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppConstants.primaryButtonColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.bar_chart_rounded,
+                            size: 18,
                             color: AppConstants.primaryButtonColor,
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.chevron_right,
-                          size: 18,
-                          color: AppConstants.primaryButtonColor,
-                        ),
-                      ],
+                          SizedBox(width: 6),
+                          Text(
+                            '統計',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: AppConstants.primaryButtonColor,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                  // 右側：歷史紀錄入口
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const HistoryScreen()),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppConstants.primaryButtonColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.auto_stories,
+                            size: 18,
+                            color: AppConstants.primaryButtonColor,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '已專注: ${timerProvider.focusCount} 次',
+                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                              color: AppConstants.primaryButtonColor,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Icon(
+                            Icons.chevron_right,
+                            size: 18,
+                            color: AppConstants.primaryButtonColor,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             
@@ -212,9 +275,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showRewardModal(BuildContext context, TimerProvider provider) {
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      barrierDismissible: false,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      isDismissible: false,
+      enableDrag: false,
       builder: (ctx) => RewardModal(
         currentFocusCount: provider.focusCount,
         storyText: provider.currentStory,
@@ -233,6 +299,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return AppConstants.luffySleeping;
       case TimerState.finished:
         return AppConstants.luffyHappy;
+      case TimerState.failed:
+        return AppConstants.luffyInterrupted;
     }
   }
 
@@ -299,6 +367,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         onPressed: () => _showGiveUpDialog(context, provider),
         child: const Text('放棄', style: TextStyle(fontSize: 18, color: AppConstants.primaryTextColor)),
       );
+    } else if (provider.state == TimerState.failed) {
+      return ElevatedButton(
+        onPressed: () => provider.resetFromFailure(),
+        child: const Text('沒關係，下次再加油！', style: TextStyle(fontSize: 18)),
+      );
     } else {
       return ElevatedButton(
         onPressed: () => provider.resetAfterReward(),
@@ -308,36 +381,116 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showGiveUpDialog(BuildContext context, TimerProvider provider) {
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('確定要放棄嗎？'),
-        content: const Text('路飛正在安靜地睡覺，現在放棄會把路飛吵醒喔！'),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('繼續專注', style: TextStyle(color: AppConstants.primaryTextColor)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppConstants.cancelButtonColor,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.help_outline, color: AppConstants.primaryButtonColor, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              '確定要放棄嗎？',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: AppConstants.primaryTextColor,
+                  ),
             ),
-            onPressed: () {
-              Navigator.pop(ctx);
-              provider.giveUp();
-              
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('🐶 汪！路飛被吵醒了...'),
-                  duration: Duration(seconds: 2),
-                  behavior: SnackBarBehavior.floating,
+            const SizedBox(height: 12),
+            const Text(
+              '路飛正在安靜地睡覺，現在放棄會把路飛吵醒喔！',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                height: 1.5,
+                color: AppConstants.primaryTextColor,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('繼續專注', style: TextStyle(color: AppConstants.primaryTextColor)),
+                  ),
                 ),
-              );
-            },
-            child: const Text('放棄', style: TextStyle(color: AppConstants.primaryTextColor)),
-          ),
-        ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppConstants.cancelButtonColor,
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      provider.giveUp();
+                    },
+                    child: const Text('放棄', style: TextStyle(color: AppConstants.primaryTextColor)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFailureDialog(BuildContext context, TimerProvider provider) {
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.sentiment_very_dissatisfied, color: Colors.orange, size: 48),
+            const SizedBox(height: 16),
+            Text(
+              '專注中斷了...',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: AppConstants.primaryTextColor,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '嗚嗚，路飛被吵醒了！\n這次的專注時間沒能完成，路飛看起來有點失落。',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                height: 1.5,
+                color: AppConstants.primaryTextColor,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  provider.resetFromFailure();
+                },
+                child: const Text('對不起，路飛'),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }

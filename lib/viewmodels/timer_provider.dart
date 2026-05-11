@@ -5,7 +5,7 @@ import '../core/constants.dart';
 
 export '../services/storage_service.dart' show FocusRecord;
 
-enum TimerState { initial, running, finished }
+enum TimerState { initial, running, finished, failed }
 
 class TimerProvider extends ChangeNotifier {
   final StorageService _storageService;
@@ -26,6 +26,26 @@ class TimerProvider extends ChangeNotifier {
 
   // 獲取歷史紀錄（最新的在最前面）
   List<FocusRecord> get focusHistory => _storageService.focusHistory;
+
+  // ==================== 統計相關 Getters ====================
+
+  // 今日專注次數
+  int get todayFocusCount => _storageService.getFocusCountForDate(DateTime.now());
+
+  // 今日專注總分鐘數
+  int get todayFocusMinutes => _storageService.getFocusMinutesForDate(DateTime.now());
+
+  // 連續專注天數
+  int get currentStreak => _storageService.getCurrentStreak();
+
+  // 本週總覽
+  ({int count, int minutes}) get thisWeekSummary => _storageService.getThisWeekSummary();
+
+  // 最近七天每日專注次數
+  List<int> get last7DaysFocusCounts => _storageService.getLast7DaysFocusCounts();
+
+  // 最近七天星期標籤
+  List<String> get last7DaysLabels => _storageService.getLast7DaysLabels();
 
   // 格式化剩餘時間為 MM:SS
   String get timeString {
@@ -51,9 +71,15 @@ class TimerProvider extends ChangeNotifier {
     });
   }
 
-  // 放棄計時 (重置)
+  // 放棄計時 (進入失敗狀態)
   void giveUp() {
     _timer?.cancel();
+    _state = TimerState.failed;
+    notifyListeners();
+  }
+
+  // 從失敗狀態重置回初始狀態
+  void resetFromFailure() {
     _remainingSeconds = AppConstants.defaultTimerSeconds;
     _state = TimerState.initial;
     notifyListeners();

@@ -5,12 +5,19 @@ class AppConstants {
   static const String luffyAwake = 'assets/images/luffy_awake.png';
   static const String luffySleeping = 'assets/images/luffy_sleeping.png';
   static const String luffyHappy = 'assets/images/luffy_happy.png';
+  static const String luffyInterrupted = 'assets/images/luffy_interrupted.png';
 
   // 顏色
   static const Color backgroundColor = Color(0xFFFDF6E3); // 米黃色低飽和度暖色
   static const Color primaryTextColor = Color(0xFF5C4B51);
   static const Color primaryButtonColor = Color(0xFFE2A76F); // 溫暖的橘色調
   static const Color cancelButtonColor = Color(0xFFD6C5B3);
+
+  // 統計頁面用色
+  static const Color chartBarColor = Color(0xFFE2A76F);       // 柱狀圖主色（橘色，與主按鈕色一致）
+  static const Color chartBarInactive = Color(0xFFE8D5C4);    // 柱狀圖非今日色
+  static const Color streakFireColor = Color(0xFFFF6B35);     // 連續天數火焰色
+  static const Color cardBackground = Color(0xFFFFFFFF);      // 統計卡片背景
 
   // 睡前小故事列表 (加長版，依序循環播放)
   static const List<String> bedtimeStories = [
