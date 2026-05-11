@@ -92,7 +92,7 @@ class StatisticsScreen extends StatelessWidget {
             children: [
               const Row(
                 children: [
-                  Text('🐶', style: TextStyle(fontSize: 20)),
+                  Icon(Icons.pets, size: 22, color: AppConstants.primaryButtonColor),
                   SizedBox(width: 8),
                   Text(
                     '今日專注',
@@ -104,12 +104,19 @@ class StatisticsScreen extends StatelessWidget {
                   ),
                 ],
               ),
-              Text(
-                '📅 $dateStr',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: AppConstants.primaryTextColor.withOpacity(0.5),
-                ),
+              Row(
+                children: [
+                  Icon(Icons.calendar_today_rounded, size: 16,
+                    color: AppConstants.primaryTextColor.withOpacity(0.5)),
+                  SizedBox(width: 4),
+                  Text(
+                    dateStr,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: AppConstants.primaryTextColor.withOpacity(0.5),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -119,13 +126,13 @@ class StatisticsScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _buildStatItem('🍅', '$todayCount', '次'),
+              _buildStatItem(Icons.local_fire_department_rounded, '$todayCount', '次'),
               Container(
                 width: 1,
                 height: 40,
                 color: AppConstants.primaryTextColor.withOpacity(0.1),
               ),
-              _buildStatItem('⏱', '$todayMinutes', '分鐘'),
+              _buildStatItem(Icons.timer_outlined, '$todayMinutes', '分鐘'),
             ],
           ),
 
@@ -138,9 +145,12 @@ class StatisticsScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                streak > 0 ? '🔥' : '💤',
-                style: const TextStyle(fontSize: 22),
+              Icon(
+                streak > 0 ? Icons.whatshot_rounded : Icons.bedtime_rounded,
+                size: 24,
+                color: streak > 0
+                    ? AppConstants.streakFireColor
+                    : AppConstants.primaryTextColor.withOpacity(0.4),
               ),
               const SizedBox(width: 8),
               Text(
@@ -160,14 +170,14 @@ class StatisticsScreen extends StatelessWidget {
     );
   }
 
-  /// 數據項（數字 + 單位）
-  Widget _buildStatItem(String emoji, String value, String unit) {
+  /// 數據項（圖示 + 數字 + 單位）
+  Widget _buildStatItem(IconData icon, String value, String unit) {
     return Column(
       children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(emoji, style: const TextStyle(fontSize: 18)),
+            Icon(icon, size: 22, color: AppConstants.primaryButtonColor),
             const SizedBox(width: 6),
             Text(
               value,
@@ -217,13 +227,19 @@ class StatisticsScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '📊 本週專注趨勢',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppConstants.primaryTextColor,
-            ),
+          const Row(
+            children: [
+              Icon(Icons.show_chart_rounded, size: 22, color: AppConstants.primaryButtonColor),
+              SizedBox(width: 8),
+              Text(
+                '本週專注趨勢',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppConstants.primaryTextColor,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
           SizedBox(
@@ -261,13 +277,19 @@ class StatisticsScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            '📋 本週總覽',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppConstants.primaryTextColor,
-            ),
+          const Row(
+            children: [
+              Icon(Icons.assessment_outlined, size: 22, color: AppConstants.primaryButtonColor),
+              SizedBox(width: 8),
+              Text(
+                '本週總覽',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppConstants.primaryTextColor,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 20),
           _buildOverviewRow('總專注次數', '${summary.count} 次'),
