@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/constants.dart';
 import '../viewmodels/timer_provider.dart';
+import '../viewmodels/pet_viewmodel.dart';
 import '../services/notification_service.dart';
 import 'widgets/reward_modal.dart';
 import 'history_screen.dart';
 import 'statistics_screen.dart';
+import 'pet_management_screen.dart';
+import 'widgets/firebase_storage_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,7 +20,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   TimerState? _previousState;
   final NotificationService _notificationService = NotificationService();
-  
+
   // 追蹤是否已經請求過通知權限（僅在本次 App 生命週期內）
   bool _hasRequestedPermission = false;
 
@@ -39,41 +42,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final timerProvider = context.read<TimerProvider>();
-    
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    final petViewModel = context.read<PetViewModel>();
+
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
       // App 進入後台且計時器正在運行 → 發送可愛提醒通知
       if (timerProvider.state == TimerState.running) {
-        _notificationService.showFocusReminder();
+        final pet = petViewModel.selectedPet;
+        _notificationService.showFocusReminder(
+          petName: pet?.name ?? '路飛',
+          species: pet?.species ?? 'dog',
+        );
       }
     } else if (state == AppLifecycleState.resumed) {
+      timerProvider.syncWithClock();
       // 用戶回到前台 → 清除通知
       _notificationService.cancelAll();
     }
   }
 
-  /// 處理「開始專注」按鈕的點擊邏輯
-  /// 第一次點擊時：先展示通知說明彈窗 → 請求權限 → 然後開始計時
-  /// 之後：直接開始計時
-  Future<void> _handleStartFocus(TimerProvider provider) async {
-    if (!_hasRequestedPermission) {
-      _hasRequestedPermission = true;
-      
-      // 展示可愛的通知權限說明彈窗
-      final userAgreed = await _showNotificationExplanationDialog();
-      
-      if (userAgreed == true) {
-        // 用戶同意後，觸發系統權限請求
-        await _notificationService.requestPermission();
-      }
-    }
-    
-    // 無論用戶是否同意通知，都開始計時（核心功能不受影響）
-    provider.startTimer();
-  }
-
   /// 展示通知權限的說明彈窗
-  /// 用可愛的路飛口吻解釋為什麼需要通知權限
-  Future<bool?> _showNotificationExplanationDialog() {
+  Future<bool?> _showNotificationExplanationDialog(String petName) {
     return showModalBottomSheet<bool>(
       context: context,
       isDismissible: false,
@@ -96,20 +85,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   size: 28,
                 ),
                 const SizedBox(width: 8),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    '路飛想守護你的專注！',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    '$petName想守護你的專注！',
+                    style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
-            const Text(
-              '🐶 汪！我是路飛～\n\n'
+            Text(
+              '🐾 哈囉！我是$petName～\n\n'
               '如果你在專注的時候偷偷跑去滑手機，我會發一條通知提醒你回來喔！\n\n'
               '畢竟...我都這麼努力在幫你守護專注時間了，你可不能辜負我的一片苦心呀！',
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 15,
                 height: 1.6,
                 color: AppConstants.primaryTextColor,
@@ -132,7 +122,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   flex: 2,
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('好的，讓路飛守護我！'),
+                    child: Text('好的，讓$petName守護我！'),
                   ),
                 ),
               ],
@@ -147,19 +137,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final timerProvider = context.watch<TimerProvider>();
+    final petViewModel = context.watch<PetViewModel>();
     final state = timerProvider.state;
+    final petName = petViewModel.selectedPet?.name ?? '路飛';
 
     // 監聽狀態變化，若從 running 變成 finished，則彈出獎勵
     if (_previousState == TimerState.running && state == TimerState.finished) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showRewardModal(context, timerProvider);
+        _showRewardModal(context, timerProvider, petName, petViewModel);
       });
     }
-    
+
     // 監聽狀態變化，若變成 failed，則彈出失敗提醒
     if (_previousState == TimerState.running && state == TimerState.failed) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showFailureDialog(context, timerProvider);
+        _showFailureDialog(context, timerProvider, petName);
       });
     }
     _previousState = state;
@@ -170,7 +162,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -179,13 +172,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const StatisticsScreen()),
+                        MaterialPageRoute(
+                            builder: (_) => const StatisticsScreen()),
                       );
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
-                        color: AppConstants.primaryButtonColor.withOpacity(0.12),
+                        color: AppConstants.primaryButtonColor
+                            .withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: const Row(
@@ -193,10 +189,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         children: [
                           Icon(
                             Icons.bar_chart_rounded,
-                            size: 18,
+                            size: 16,
                             color: AppConstants.primaryButtonColor,
                           ),
-                          SizedBox(width: 6),
+                          SizedBox(width: 4),
                           Text(
                             '統計',
                             style: TextStyle(
@@ -213,13 +209,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const HistoryScreen()),
+                        MaterialPageRoute(
+                            builder: (_) => const HistoryScreen()),
                       );
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
-                        color: AppConstants.primaryButtonColor.withOpacity(0.12),
+                        color: AppConstants.primaryButtonColor
+                            .withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -227,22 +226,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         children: [
                           const Icon(
                             Icons.auto_stories,
-                            size: 18,
+                            size: 16,
                             color: AppConstants.primaryButtonColor,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '已專注: ${timerProvider.focusCount} 次',
-                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: AppConstants.primaryButtonColor,
-                            ),
                           ),
                           const SizedBox(width: 4),
-                          const Icon(
-                            Icons.chevron_right,
-                            size: 18,
-                            color: AppConstants.primaryButtonColor,
+                          Text(
+                            '已專注: ${timerProvider.focusCount}',
+                            style:
+                                Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: AppConstants.primaryButtonColor,
+                                    ),
                           ),
                         ],
                       ),
@@ -251,30 +245,62 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
-            
             const Spacer(),
-
-            _buildLuffyImage(state),
-
+            _buildLuffyImage(state, petViewModel),
             const SizedBox(height: 48),
-
             Text(
               timerProvider.timeString,
               style: Theme.of(context).textTheme.displayLarge,
             ),
-
             const SizedBox(height: 48),
-
-            _buildActionButtons(context, timerProvider),
-
-            const Spacer(),
+            _buildActionButtons(context, timerProvider, petName),
+            const SizedBox(height: 28),
+            _buildPetFriendsButton(context),
+            const Spacer(flex: 2),
           ],
         ),
       ),
     );
   }
 
-  void _showRewardModal(BuildContext context, TimerProvider provider) {
+  Widget _buildPetFriendsButton(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const PetManagementScreen()),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppConstants.primaryButtonColor.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.pets,
+              size: 18,
+              color: AppConstants.primaryButtonColor,
+            ),
+            SizedBox(width: 6),
+            Text(
+              '路飛的好朋友',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: AppConstants.primaryButtonColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showRewardModal(BuildContext context, TimerProvider provider,
+      String petName, PetViewModel petVM) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -283,7 +309,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       enableDrag: false,
       builder: (ctx) => RewardModal(
         currentFocusCount: provider.focusCount,
-        storyText: provider.currentStory,
+        storyText: provider.currentRewardStory ?? '加載故事中...',
+        petName: petName,
+        petImageUrl: _getImagePathForState(TimerState.finished, petVM),
+        isNetworkImage:
+            petVM.selectedPet != null && !petVM.selectedPet!.isLocalAsset,
         onClaimReward: () {
           provider.resetAfterReward();
         },
@@ -291,72 +321,140 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  String _getImagePathForState(TimerState state) {
-    switch (state) {
-      case TimerState.initial:
-        return AppConstants.luffyAwake;
-      case TimerState.running:
-        return AppConstants.luffySleeping;
-      case TimerState.finished:
-        return AppConstants.luffyHappy;
-      case TimerState.failed:
-        return AppConstants.luffyInterrupted;
+  String _getImagePathForState(TimerState state, PetViewModel petVM) {
+    final pet = petVM.selectedPet;
+    if (pet != null) {
+      switch (state) {
+        case TimerState.initial:
+          return pet.normalImageUrl;
+        case TimerState.running:
+          return pet.sleepingImageUrl;
+        case TimerState.finished:
+          return pet.normalImageUrl;
+        case TimerState.failed:
+          return pet.failedImageUrl;
+      }
+    } else {
+      switch (state) {
+        case TimerState.initial:
+          return AppConstants.luffyAwake;
+        case TimerState.running:
+          return AppConstants.luffySleeping;
+        case TimerState.finished:
+          return AppConstants.luffyHappy;
+        case TimerState.failed:
+          return AppConstants.luffyInterrupted;
+      }
     }
   }
 
-  Widget _buildLuffyImage(TimerState state) {
-    final imagePath = _getImagePathForState(state);
-    
-    return Container(
-      width: 250,
-      height: 250,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.5),
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 20,
-            spreadRadius: 5,
+  Widget _buildLuffyImage(TimerState state, PetViewModel petVM) {
+    final pet = petVM.selectedPet;
+    final imagePath = _getImagePathForState(state, petVM);
+    // 只有選了自定義寵物且不是本地 asset 的情況才用 Image.network
+    final isNetwork = pet != null && !pet.isLocalAsset;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (pet != null) ...[
+          Container(
+            constraints: const BoxConstraints(maxWidth: 220),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Text(
+              pet.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppConstants.primaryTextColor,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+        Container(
+          width: 250,
+          height: 250,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.5),
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 20,
+                spreadRadius: 5,
+              ),
+            ],
+          ),
+          child: ClipOval(
+            child: isNetwork
+                ? FirebaseStorageImage(
+                    imageUrl: imagePath,
+                    fit: BoxFit.cover,
+                    errorBuilder: _buildImageError,
+                  )
+                : Image.asset(
+                    imagePath,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        _buildImageError(context, error),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImageError(BuildContext context, Object error) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(
+            Icons.pets,
+            size: 48,
+            color: AppConstants.primaryButtonColor,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '圖片載入中\n(或載入失敗)',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
           ),
         ],
-      ),
-      child: ClipOval(
-        child: Image.asset(
-          imagePath,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    state == TimerState.running 
-                      ? Icons.nights_stay 
-                      : (state == TimerState.finished ? Icons.celebration : Icons.pets),
-                    size: 48,
-                    color: AppConstants.primaryButtonColor,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '圖片載入中\n(佔位符)',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
       ),
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, TimerProvider provider) {
+  Widget _buildActionButtons(
+      BuildContext context, TimerProvider provider, String petName) {
     if (provider.state == TimerState.initial) {
       return ElevatedButton(
-        // 改為呼叫帶有通知權限檢查的 _handleStartFocus
-        onPressed: () => _handleStartFocus(provider),
+        // 第一次開始專注會呼叫提醒，這裡需要修改_handleStartFocus
+        onPressed: () async {
+          if (!_hasRequestedPermission) {
+            _hasRequestedPermission = true;
+            final userAgreed =
+                await _showNotificationExplanationDialog(petName);
+            if (userAgreed == true) {
+              await _notificationService.requestPermission();
+            }
+          }
+          provider.startTimer();
+        },
         child: const Text('開始專注', style: TextStyle(fontSize: 18)),
       );
     } else if (provider.state == TimerState.running) {
@@ -364,8 +462,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         style: ElevatedButton.styleFrom(
           backgroundColor: AppConstants.cancelButtonColor,
         ),
-        onPressed: () => _showGiveUpDialog(context, provider),
-        child: const Text('放棄', style: TextStyle(fontSize: 18, color: AppConstants.primaryTextColor)),
+        onPressed: () => _showGiveUpDialog(context, provider, petName),
+        child: const Text('放棄',
+            style:
+                TextStyle(fontSize: 18, color: AppConstants.primaryTextColor)),
       );
     } else if (provider.state == TimerState.failed) {
       return ElevatedButton(
@@ -380,7 +480,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _showGiveUpDialog(BuildContext context, TimerProvider provider) {
+  void _showGiveUpDialog(
+      BuildContext context, TimerProvider provider, String petName) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -393,7 +494,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.help_outline, color: AppConstants.primaryButtonColor, size: 48),
+            const Icon(Icons.help_outline,
+                color: AppConstants.primaryButtonColor, size: 48),
             const SizedBox(height: 16),
             Text(
               '確定要放棄嗎？',
@@ -403,10 +505,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
             ),
             const SizedBox(height: 12),
-            const Text(
-              '路飛正在安靜地睡覺，現在放棄會把路飛吵醒喔！',
+            Text(
+              '$petName正在安靜地睡覺，現在放棄會把$petName吵醒喔！',
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 16,
                 height: 1.5,
                 color: AppConstants.primaryTextColor,
@@ -418,7 +520,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Expanded(
                   child: TextButton(
                     onPressed: () => Navigator.pop(ctx),
-                    child: const Text('繼續專注', style: TextStyle(color: AppConstants.primaryTextColor)),
+                    child: const Text('繼續專注',
+                        style: TextStyle(color: AppConstants.primaryTextColor)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -431,7 +534,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Navigator.pop(ctx);
                       provider.giveUp();
                     },
-                    child: const Text('放棄', style: TextStyle(color: AppConstants.primaryTextColor)),
+                    child: const Text('放棄',
+                        style: TextStyle(color: AppConstants.primaryTextColor)),
                   ),
                 ),
               ],
@@ -443,7 +547,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _showFailureDialog(BuildContext context, TimerProvider provider) {
+  void _showFailureDialog(
+      BuildContext context, TimerProvider provider, String petName) {
     showModalBottomSheet(
       context: context,
       isDismissible: false,
@@ -458,7 +563,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.sentiment_very_dissatisfied, color: Colors.orange, size: 48),
+            const Icon(Icons.sentiment_very_dissatisfied,
+                color: Colors.orange, size: 48),
             const SizedBox(height: 16),
             Text(
               '專注中斷了...',
@@ -468,10 +574,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
             ),
             const SizedBox(height: 12),
-            const Text(
-              '嗚嗚，路飛被吵醒了！\n這次的專注時間沒能完成，路飛看起來有點失落。',
+            Text(
+              '嗚嗚，$petName被吵醒了！\n這次的專注時間沒能完成，$petName看起來有點失落。',
               textAlign: TextAlign.center,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 16,
                 height: 1.5,
                 color: AppConstants.primaryTextColor,
@@ -485,7 +591,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Navigator.pop(ctx);
                   provider.resetFromFailure();
                 },
-                child: const Text('對不起，路飛'),
+                child: Text('對不起，$petName'),
               ),
             ),
             const SizedBox(height: 8),

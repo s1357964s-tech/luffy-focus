@@ -1,15 +1,22 @@
 import 'package:flutter/material.dart';
 import '../../core/constants.dart';
+import 'firebase_storage_image.dart';
 
 class RewardModal extends StatelessWidget {
   final int currentFocusCount;
   final String storyText;
+  final String petName;
+  final String petImageUrl;
+  final bool isNetworkImage;
   final VoidCallback onClaimReward;
 
   const RewardModal({
     super.key,
     required this.currentFocusCount,
     required this.storyText,
+    required this.petName,
+    required this.petImageUrl,
+    required this.isNetworkImage,
     required this.onClaimReward,
   });
 
@@ -24,10 +31,32 @@ class RewardModal extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
-            Icons.celebration,
-            color: AppConstants.primaryButtonColor,
-            size: 48,
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.1),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: ClipOval(
+              child: isNetworkImage
+                  ? FirebaseStorageImage(
+                      imageUrl: petImageUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __) => const Icon(Icons.pets,
+                          size: 40, color: AppConstants.primaryButtonColor),
+                    )
+                  : Image.asset(
+                      petImageUrl,
+                      fit: BoxFit.cover,
+                    ),
+            ),
           ),
           const SizedBox(height: 16),
           Text(
@@ -79,7 +108,7 @@ class RewardModal extends StatelessWidget {
                 Navigator.pop(context);
                 onClaimReward();
               },
-              child: const Text('摸摸路飛的頭並繼續'),
+              child: Text('摸摸$petName的頭並繼續'),
             ),
           ),
           const SizedBox(height: 8),

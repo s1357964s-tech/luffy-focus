@@ -16,6 +16,10 @@
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
+		A14F4E7E2FB9EDB20049F483 /* GoogleService-Info (1).plist in Resources */ = {isa = PBXBuildFile; fileRef = A14F4E7D2FB9EDB20049F483 /* GoogleService-Info (1).plist */; };
+		B7F001012ECF000100000001 /* luffy_dog.wav in Resources */ = {isa = PBXBuildFile; fileRef = B7F001002ECF000100000001 /* luffy_dog.wav */; };
+		B7F001032ECF000100000001 /* luffy_cat.wav in Resources */ = {isa = PBXBuildFile; fileRef = B7F001022ECF000100000001 /* luffy_cat.wav */; };
+		B7F001052ECF000100000001 /* luffy_rabbit.wav in Resources */ = {isa = PBXBuildFile; fileRef = B7F001042ECF000100000001 /* luffy_rabbit.wav */; };
 		AD3AEB143D164F09AD57EA29 /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2B133DD6C4374EFD60010317 /* Pods_RunnerTests.framework */; };
 /* End PBXBuildFile section */
 
@@ -67,6 +71,10 @@
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		9DFA3F648A108F8D42546B00 /* Pods-RunnerTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RunnerTests.release.xcconfig"; path = "Target Support Files/Pods-RunnerTests/Pods-RunnerTests.release.xcconfig"; sourceTree = "<group>"; };
+		A14F4E7D2FB9EDB20049F483 /* GoogleService-Info (1).plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info (1).plist"; sourceTree = "<group>"; };
+		B7F001002ECF000100000001 /* luffy_dog.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = luffy_dog.wav; sourceTree = "<group>"; };
+		B7F001022ECF000100000001 /* luffy_cat.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = luffy_cat.wav; sourceTree = "<group>"; };
+		B7F001042ECF000100000001 /* luffy_rabbit.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = luffy_rabbit.wav; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -141,6 +149,10 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
+				A14F4E7D2FB9EDB20049F483 /* GoogleService-Info (1).plist */,
+				B7F001002ECF000100000001 /* luffy_dog.wav */,
+				B7F001022ECF000100000001 /* luffy_cat.wav */,
+				B7F001042ECF000100000001 /* luffy_rabbit.wav */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -240,6 +252,9 @@
 				Base,
 			);
 			mainGroup = 97C146E51CF9000F007C117D;
+			packageReferences = (
+				A14F4E7F2FB9EF570049F483 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -264,6 +279,10 @@
 			files = (
 				97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */,
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
+				A14F4E7E2FB9EDB20049F483 /* GoogleService-Info (1).plist in Resources */,
+				B7F001012ECF000100000001 /* luffy_dog.wav in Resources */,
+				B7F001032ECF000100000001 /* luffy_cat.wav in Resources */,
+				B7F001052ECF000100000001 /* luffy_rabbit.wav in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
 			);
@@ -458,7 +477,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -588,7 +607,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
@@ -639,7 +658,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 13.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -729,6 +748,17 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A14F4E7F2FB9EF570049F483 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.13.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 	};
 	rootObject = 97C146E61CF9000F007C117D /* Project object */;
 }

@@ -1,31 +1,161 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:home_widget/home_widget.dart';
 
 /// 單筆歷史紀錄的資料模型
 class FocusRecord {
   final String storyText;
   final DateTime completedAt;
+  final String? petId;
+  final String? petName;
+  final String? species;
 
-  FocusRecord({required this.storyText, required this.completedAt});
+  FocusRecord({
+    required this.storyText,
+    required this.completedAt,
+    this.petId,
+    this.petName,
+    this.species,
+  });
 
   // 序列化為 JSON Map
   Map<String, dynamic> toJson() => {
-    'storyText': storyText,
-    'completedAt': completedAt.toIso8601String(),
-  };
+        'storyText': storyText,
+        'completedAt': completedAt.toIso8601String(),
+        'petId': petId,
+        'petName': petName,
+        'species': species,
+      };
 
   // 從 JSON Map 反序列化
   factory FocusRecord.fromJson(Map<String, dynamic> json) => FocusRecord(
-    storyText: json['storyText'] as String,
-    completedAt: DateTime.parse(json['completedAt'] as String),
-  );
+        storyText: json['storyText'] as String,
+        completedAt: DateTime.parse(json['completedAt'] as String),
+        petId: json['petId'] as String?,
+        petName: json['petName'] as String?,
+        species: json['species'] as String?,
+      );
+}
+
+/// 自定義寵物模型
+class CustomPet {
+  final String id;
+  final String name;
+  final String species; // cat, dog, rabbit
+  final String? breed;
+  final String breedTraits;
+  final List<String> visualTraits;
+  final String? originalImagePath;
+  final String normalImageUrl;
+  final String sleepingImageUrl;
+  final String failedImageUrl;
+  final String status;
+  final DateTime createdAt;
+
+  /// 標記圖片是否為本地 asset（Mock 模式使用 Image.asset，正式模式使用 Image.network）
+  final bool isLocalAsset;
+
+  CustomPet({
+    required this.id,
+    required this.name,
+    required this.species,
+    this.breed,
+    this.breedTraits = '',
+    this.visualTraits = const [],
+    this.originalImagePath,
+    required this.normalImageUrl,
+    required this.sleepingImageUrl,
+    required this.failedImageUrl,
+    this.status = 'ready',
+    required this.createdAt,
+    this.isLocalAsset = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'species': species,
+        'breed': breed,
+        'breedTraits': breedTraits,
+        'visualTraits': visualTraits,
+        'originalImagePath': originalImagePath,
+        'normalImageUrl': normalImageUrl,
+        'sleepingImageUrl': sleepingImageUrl,
+        'failedImageUrl': failedImageUrl,
+        'status': status,
+        'createdAt': createdAt.toIso8601String(),
+        'isLocalAsset': isLocalAsset,
+      };
+
+  factory CustomPet.fromJson(Map<String, dynamic> json) => CustomPet(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        species: json['species'] as String,
+        breed: json['breed'] as String?,
+        breedTraits: json['breedTraits'] as String? ?? '',
+        visualTraits:
+            (json['visualTraits'] as List? ?? []).whereType<String>().toList(),
+        originalImagePath: json['originalImagePath'] as String?,
+        normalImageUrl: json['normalImageUrl'] as String,
+        sleepingImageUrl: json['sleepingImageUrl'] as String,
+        failedImageUrl: json['failedImageUrl'] as String,
+        status: json['status'] as String? ?? 'ready',
+        createdAt: _parseDateTime(json['createdAt']),
+        isLocalAsset: json['isLocalAsset'] as bool? ?? false,
+      );
+
+  CustomPet copyWith({
+    String? id,
+    String? name,
+    String? species,
+    String? breed,
+    String? breedTraits,
+    List<String>? visualTraits,
+    String? originalImagePath,
+    String? normalImageUrl,
+    String? sleepingImageUrl,
+    String? failedImageUrl,
+    String? status,
+    DateTime? createdAt,
+    bool? isLocalAsset,
+  }) {
+    return CustomPet(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      species: species ?? this.species,
+      breed: breed ?? this.breed,
+      breedTraits: breedTraits ?? this.breedTraits,
+      visualTraits: visualTraits ?? this.visualTraits,
+      originalImagePath: originalImagePath ?? this.originalImagePath,
+      normalImageUrl: normalImageUrl ?? this.normalImageUrl,
+      sleepingImageUrl: sleepingImageUrl ?? this.sleepingImageUrl,
+      failedImageUrl: failedImageUrl ?? this.failedImageUrl,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+      isLocalAsset: isLocalAsset ?? this.isLocalAsset,
+    );
+  }
+}
+
+DateTime _parseDateTime(dynamic value) {
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.parse(value);
+  return DateTime.now();
 }
 
 class StorageService {
   static const String _focusCountKey = 'luffy_focus_count';
   static const String _storyIndexKey = 'luffy_story_index';
   static const String _historyKey = 'luffy_focus_history';
-  
+  static const String _customPetsKey = 'luffy_custom_pets';
+  static const String _selectedPetIdKey =
+      'luffy_selected_pet_id'; // 空字串或 null 代表預設路飛
+  static const String _uploadFailureCountKey = 'luffy_upload_failure_count';
+  static const String _firstUploadFailureTimeKey =
+      'luffy_first_upload_failure_time';
+  static const String _uploadLockUntilKey = 'luffy_upload_lock_until';
+
   final SharedPreferences _prefs;
 
   StorageService(this._prefs);
@@ -62,10 +192,18 @@ class StorageService {
   }
 
   // 新增一筆歷史紀錄
-  Future<void> addFocusRecord(String storyText) async {
+  Future<void> addFocusRecord(
+    String storyText, {
+    String? petId,
+    String? petName,
+    String? species,
+  }) async {
     final record = FocusRecord(
       storyText: storyText,
       completedAt: DateTime.now(),
+      petId: petId,
+      petName: petName,
+      species: species,
     );
     final jsonList = _prefs.getStringList(_historyKey) ?? [];
     jsonList.add(jsonEncode(record.toJson()));
@@ -73,9 +211,131 @@ class StorageService {
   }
 
   // 前進到下一個故事
-  Future<void> incrementStoryIndex(int totalStories) async {
+  Future<void> incrementStoryIndex([int? totalStories]) async {
     final currentIndex = storyIndex;
-    await _prefs.setInt(_storyIndexKey, (currentIndex + 1) % totalStories);
+    await _prefs.setInt(_storyIndexKey, currentIndex + 1);
+  }
+
+  // ==================== 自定義寵物相關 ====================
+
+  /// 獲取所有自定義寵物
+  List<CustomPet> get customPets {
+    final jsonList = _prefs.getStringList(_customPetsKey) ?? [];
+    return jsonList
+        .map((jsonStr) => CustomPet.fromJson(jsonDecode(jsonStr)))
+        .toList();
+  }
+
+  /// 獲取當前選定的寵物 ID
+  String? get selectedPetId {
+    final id = _prefs.getString(_selectedPetIdKey);
+    if (id == null || id.isEmpty) return null;
+    return id;
+  }
+
+  /// 獲取當前選定的寵物（若回傳 null 則代表使用預設路飛）
+  CustomPet? get selectedPet {
+    final id = selectedPetId;
+    if (id == null) return null;
+    try {
+      return customPets.firstWhere((pet) => pet.id == id);
+    } catch (e) {
+      return null; // 找不到則回傳 null
+    }
+  }
+
+  /// 儲存選定的寵物 ID (傳入 null 代表切換回路飛)
+  Future<void> setSelectedPetId(String? id) async {
+    if (id == null) {
+      await _prefs.remove(_selectedPetIdKey);
+    } else {
+      await _prefs.setString(_selectedPetIdKey, id);
+    }
+    await _updateWidgetData();
+  }
+
+  /// 同步資料給 iOS/Android Widget
+  /// 在 macOS 桌面等不支援 home_widget 的平台上會靜默跳過
+  Future<void> _updateWidgetData() async {
+    try {
+      final pet = selectedPet;
+      final String widgetImageUrl =
+          pet != null ? pet.normalImageUrl : 'luffy_awake';
+
+      await HomeWidget.setAppGroupId('group.com.s1357964stech.luffyfocus');
+      await HomeWidget.saveWidgetData<String>('pet_image_url', widgetImageUrl);
+      await HomeWidget.saveWidgetData<bool>(
+          'is_network_image', pet != null && !pet.isLocalAsset);
+      await HomeWidget.updateWidget(
+        iOSName: 'LuffyWidget',
+        androidName: 'LuffyWidgetProvider',
+      );
+    } catch (e) {
+      // macOS 桌面端不支援 home_widget，靜默忽略
+      debugPrint('Widget 更新跳過（平台不支援或尚未設定）: $e');
+    }
+  }
+
+  /// 新增一隻自定義寵物
+  Future<void> addCustomPet(CustomPet pet) async {
+    final pets = customPets;
+    pets.add(pet);
+    final jsonList = pets.map((p) => jsonEncode(p.toJson())).toList();
+    await _prefs.setStringList(_customPetsKey, jsonList);
+  }
+
+  /// 用雲端寵物列表同步本地快取，讓 Widget、故事服務和離線 UI 可共用同一份模型。
+  Future<void> replaceCustomPets(List<CustomPet> pets) async {
+    final jsonList = pets.map((p) => jsonEncode(p.toJson())).toList();
+    await _prefs.setStringList(_customPetsKey, jsonList);
+    await _updateWidgetData();
+  }
+
+  // ==================== 防刷機制相關 ====================
+
+  /// 檢查是否被鎖定上傳
+  bool get isUploadLocked {
+    final lockUntilStr = _prefs.getString(_uploadLockUntilKey);
+    if (lockUntilStr == null) return false;
+    final lockUntil = DateTime.parse(lockUntilStr);
+    return DateTime.now().isBefore(lockUntil);
+  }
+
+  /// 記錄一次失敗上傳
+  /// 回傳是否因此被鎖定 (true 表示觸發了 24 小時鎖定)
+  Future<bool> recordUploadFailure() async {
+    if (isUploadLocked) return true;
+
+    final now = DateTime.now();
+    final firstFailureTimeStr = _prefs.getString(_firstUploadFailureTimeKey);
+    int count = _prefs.getInt(_uploadFailureCountKey) ?? 0;
+
+    if (firstFailureTimeStr != null) {
+      final firstFailureTime = DateTime.parse(firstFailureTimeStr);
+      if (now.difference(firstFailureTime).inMinutes >= 1) {
+        // 超過 1 分鐘，重置計數
+        count = 0;
+        await _prefs.setString(
+            _firstUploadFailureTimeKey, now.toIso8601String());
+      }
+    } else {
+      await _prefs.setString(_firstUploadFailureTimeKey, now.toIso8601String());
+    }
+
+    count += 1;
+    await _prefs.setInt(_uploadFailureCountKey, count);
+
+    if (count >= 3) {
+      // 觸發鎖定 24 小時
+      final lockUntil = now.add(const Duration(hours: 24));
+      await _prefs.setString(_uploadLockUntilKey, lockUntil.toIso8601String());
+      // 鎖定後清除計數
+      await _prefs.remove(_firstUploadFailureTimeKey);
+      await _prefs.remove(_uploadFailureCountKey);
+      return true;
+    }
+
+    return false;
   }
 
   // ==================== 統計相關方法 ====================
@@ -123,7 +383,9 @@ class StorageService {
     final mondayStart = DateTime(monday.year, monday.month, monday.day);
 
     final weekRecords = focusHistory
-        .where((r) => r.completedAt.isAfter(mondayStart) || _isSameDay(r.completedAt, mondayStart))
+        .where((r) =>
+            r.completedAt.isAfter(mondayStart) ||
+            _isSameDay(r.completedAt, mondayStart))
         .toList();
 
     final count = weekRecords.length;
@@ -166,12 +428,14 @@ class StorageService {
     final mockRecords = [
       // 6 天前（1 次）
       FocusRecord(
-        storyText: '【路飛與奇幻森林的蝴蝶】\n今天下午，陽光透過窗台灑在地板上，路飛正追著一隻閃閃發光的藍色蝴蝶。不知不覺中，客廳的角落竟出現了一扇發著微光的木門。路飛好奇地用鼻子頂開了門，發現門後是一片一望無際的奇幻森林。',
+        storyText:
+            '【路飛與奇幻森林的蝴蝶】\n今天下午，陽光透過窗台灑在地板上，路飛正追著一隻閃閃發光的藍色蝴蝶。不知不覺中，客廳的角落竟出現了一扇發著微光的木門。路飛好奇地用鼻子頂開了門，發現門後是一片一望無際的奇幻森林。',
         completedAt: now.subtract(const Duration(days: 6, hours: 10)),
       ),
       // 5 天前（2 次）
       FocusRecord(
-        storyText: '【勇敢的柴犬騎士】\n在路飛的夢境裡，牠變成了一位披著紅色披風的勇敢騎士。這座名為「肉泥小鎮」的地方，最近受到了一隻巨大橘貓的威脅。',
+        storyText:
+            '【勇敢的柴犬騎士】\n在路飛的夢境裡，牠變成了一位披著紅色披風的勇敢騎士。這座名為「肉泥小鎮」的地方，最近受到了一隻巨大橘貓的威脅。',
         completedAt: now.subtract(const Duration(days: 5, hours: 9)),
       ),
       FocusRecord(
@@ -229,9 +493,7 @@ class StorageService {
       ),
     ];
 
-    final jsonList = mockRecords
-        .map((r) => jsonEncode(r.toJson()))
-        .toList();
+    final jsonList = mockRecords.map((r) => jsonEncode(r.toJson())).toList();
     await _prefs.setStringList(_historyKey, jsonList);
     await _prefs.setInt(_focusCountKey, mockRecords.length);
     // 設定故事索引為第 4 個（看起來有進度感）

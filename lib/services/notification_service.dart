@@ -12,19 +12,16 @@ class NotificationService {
 
   // 延遲建立插件實例，避免在 macOS 等平台上過早初始化導致崩潰
   FlutterLocalNotificationsPlugin? _plugin;
-  
+
   // 是否已完成初始化
   bool _isInitialized = false;
 
-  // 路飛風格的可愛提醒訊息
-  static const List<String> _focusReminders = [
-    '汪！你去哪裡了？路飛正在乖乖睡覺等你回來呢... 🐶',
-    '嗚嗚～路飛發現你不見了，快回來陪牠完成這次專注吧！',
-    '路飛睜開了一隻眼睛偷看你...牠說：「主人快回來，我還在努力睡覺呢！」',
-    '喂喂喂！路飛聞到你在外面偷吃零食的味道了！快回來專注啦～ 🍪',
-    '路飛在夢裡等你呢！如果你不回來，牠的夢境故事就要消失了... ✨',
-    '汪汪！路飛說：「我都這麼努力在睡了，你怎麼可以分心呢？」',
-    '路飛的小耳朵動了一下，牠感覺到你離開了...快回來讓牠安心睡覺吧 💤',
+  static const List<String> _focusReminderTemplates = [
+    '{petName}正在乖乖睡覺等你回來呢...',
+    '{petName}發現你不見了，快回來陪牠完成這次專注吧！',
+    '{petName}睜開了一隻眼睛偷看你...快回來，牠還在努力守護你！',
+    '{petName}在夢裡等你呢！如果你不回來，牠的夢境故事就要消失了...',
+    '{petName}的小耳朵動了一下，牠感覺到你離開了...快回來讓牠安心睡覺吧。',
   ];
 
   /// 確保通知服務已初始化（完全延遲初始化）
@@ -46,7 +43,8 @@ class NotificationService {
         requestSoundPermission: false,
       );
 
-      const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const androidSettings =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
 
       const initSettings = InitializationSettings(
         iOS: iosSettings,
@@ -102,42 +100,61 @@ class NotificationService {
   }
 
   /// 發送「專注中離開」的可愛提醒通知
-  Future<void> showFocusReminder() async {
+  Future<void> showFocusReminder({
+    required String petName,
+    required String species,
+  }) async {
     if (!_isInitialized || _plugin == null) return;
 
     try {
       final random = Random();
-      final message = _focusReminders[random.nextInt(_focusReminders.length)];
+      final message = _focusReminderTemplates[
+              random.nextInt(_focusReminderTemplates.length)]
+          .replaceAll('{petName}', petName);
+      final soundName = _soundNameForSpecies(species);
+      final channelId = 'luffy_focus_channel_$soundName';
 
-      const notificationDetails = NotificationDetails(
+      final notificationDetails = NotificationDetails(
         iOS: DarwinNotificationDetails(
           presentAlert: true,
           presentBadge: true,
           presentSound: true,
+          sound: '$soundName.wav',
         ),
         macOS: DarwinNotificationDetails(
           presentAlert: true,
           presentBadge: true,
           presentSound: true,
+          sound: '$soundName.wav',
         ),
         android: AndroidNotificationDetails(
-          'luffy_focus_channel',
+          channelId,
           '路飛專注提醒',
           channelDescription: '在專注期間離開 App 時的提醒通知',
           importance: Importance.high,
           priority: Priority.high,
+          playSound: true,
+          sound: RawResourceAndroidNotificationSound(soundName),
         ),
       );
 
       await _plugin!.show(
         0,
-        '🐶 路飛在找你！',
+        '$petName在找你！',
         message,
         notificationDetails,
       );
     } catch (e) {
       debugPrint('發送通知失敗: $e');
     }
+  }
+
+  String _soundNameForSpecies(String species) {
+    return switch (species) {
+      'cat' => 'luffy_cat',
+      'rabbit' => 'luffy_rabbit',
+      _ => 'luffy_dog',
+    };
   }
 
   /// 取消所有通知（用戶返回 App 時清除）

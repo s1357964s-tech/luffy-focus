@@ -68,5 +68,7 @@
 	</array>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>路飛番茄鐘需要通知權限，以在您專注期間離開 App 時發送可愛的提醒，幫助您保持專注。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>路飛番茄鐘需要存取您的相簿，以便您上傳寵物照片並生成專屬的卡通陪伴形象。</string>
 </dict>
 </plist>
