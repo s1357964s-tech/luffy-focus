@@ -113,18 +113,19 @@ class StoryService {
     required List<String> previousTitles,
   }) async {
     try {
-      final callable =
-          FirebaseService.functions.httpsCallable('generateRewardStory');
-      final response = await callable.call({
-        'petId': petId,
-        'petName': petName,
-        'species': species,
-        'focusMinutes': focusMinutes,
-        'storyNumber': storyNumber,
-        'previousStoryTitles': previousTitles,
-      });
+      final data = await FirebaseService.callFunction(
+        'generateRewardStory',
+        data: {
+          'petId': petId,
+          'petName': petName,
+          'species': species,
+          'focusMinutes': focusMinutes,
+          'storyNumber': storyNumber,
+          'previousStoryTitles': previousTitles,
+        },
+        timeout: const Duration(seconds: 40),
+      );
 
-      final data = response.data;
       final story = data is Map ? data['story'] : null;
       if (story is String && story.trim().isNotEmpty) {
         return story.trim();
@@ -218,7 +219,6 @@ class StoryService {
 
     final speciesText = switch (species) {
       'cat' => '貓咪',
-      'rabbit' => '兔子',
       _ => '狗狗',
     };
 

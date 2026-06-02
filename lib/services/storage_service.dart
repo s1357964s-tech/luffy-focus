@@ -30,11 +30,11 @@ class FocusRecord {
 
   // 從 JSON Map 反序列化
   factory FocusRecord.fromJson(Map<String, dynamic> json) => FocusRecord(
-        storyText: json['storyText'] as String,
-        completedAt: DateTime.parse(json['completedAt'] as String),
+        storyText: json['storyText'] as String? ?? '',
+        completedAt: _parseDateTime(json['completedAt']),
         petId: json['petId'] as String?,
         petName: json['petName'] as String?,
-        species: json['species'] as String?,
+        species: _normalizeSpecies(json['species']),
       );
 }
 
@@ -42,7 +42,7 @@ class FocusRecord {
 class CustomPet {
   final String id;
   final String name;
-  final String species; // cat, dog, rabbit
+  final String species; // cat, dog
   final String? breed;
   final String breedTraits;
   final List<String> visualTraits;
@@ -50,6 +50,7 @@ class CustomPet {
   final String normalImageUrl;
   final String sleepingImageUrl;
   final String failedImageUrl;
+  final int avatarStatesVersion;
   final String status;
   final DateTime createdAt;
 
@@ -67,6 +68,7 @@ class CustomPet {
     required this.normalImageUrl,
     required this.sleepingImageUrl,
     required this.failedImageUrl,
+    this.avatarStatesVersion = 0,
     this.status = 'ready',
     required this.createdAt,
     this.isLocalAsset = false,
@@ -83,27 +85,41 @@ class CustomPet {
         'normalImageUrl': normalImageUrl,
         'sleepingImageUrl': sleepingImageUrl,
         'failedImageUrl': failedImageUrl,
+        'avatarStatesVersion': avatarStatesVersion,
         'status': status,
         'createdAt': createdAt.toIso8601String(),
         'isLocalAsset': isLocalAsset,
       };
 
-  factory CustomPet.fromJson(Map<String, dynamic> json) => CustomPet(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        species: json['species'] as String,
-        breed: json['breed'] as String?,
-        breedTraits: json['breedTraits'] as String? ?? '',
-        visualTraits:
-            (json['visualTraits'] as List? ?? []).whereType<String>().toList(),
-        originalImagePath: json['originalImagePath'] as String?,
-        normalImageUrl: json['normalImageUrl'] as String,
-        sleepingImageUrl: json['sleepingImageUrl'] as String,
-        failedImageUrl: json['failedImageUrl'] as String,
-        status: json['status'] as String? ?? 'ready',
-        createdAt: _parseDateTime(json['createdAt']),
-        isLocalAsset: json['isLocalAsset'] as bool? ?? false,
-      );
+  factory CustomPet.fromJson(Map<String, dynamic> json) {
+    final id = _requiredString(json['id'], 'id');
+    final normalImageUrl =
+        _requiredString(json['normalImageUrl'], 'normalImageUrl');
+
+    return CustomPet(
+      id: id,
+      name: _optionalString(json['name']).isEmpty
+          ? '好朋友'
+          : _optionalString(json['name']),
+      species: _normalizeSpecies(json['species']) ?? 'dog',
+      breed: json['breed'] as String?,
+      breedTraits: json['breedTraits'] as String? ?? '',
+      visualTraits:
+          (json['visualTraits'] as List? ?? []).whereType<String>().toList(),
+      originalImagePath: json['originalImagePath'] as String?,
+      normalImageUrl: normalImageUrl,
+      sleepingImageUrl: _optionalString(json['sleepingImageUrl']).isEmpty
+          ? normalImageUrl
+          : _optionalString(json['sleepingImageUrl']),
+      failedImageUrl: _optionalString(json['failedImageUrl']).isEmpty
+          ? normalImageUrl
+          : _optionalString(json['failedImageUrl']),
+      avatarStatesVersion: _optionalInt(json['avatarStatesVersion']),
+      status: json['status'] as String? ?? 'ready',
+      createdAt: _parseDateTime(json['createdAt']),
+      isLocalAsset: json['isLocalAsset'] as bool? ?? false,
+    );
+  }
 
   CustomPet copyWith({
     String? id,
@@ -116,6 +132,7 @@ class CustomPet {
     String? normalImageUrl,
     String? sleepingImageUrl,
     String? failedImageUrl,
+    int? avatarStatesVersion,
     String? status,
     DateTime? createdAt,
     bool? isLocalAsset,
@@ -131,6 +148,7 @@ class CustomPet {
       normalImageUrl: normalImageUrl ?? this.normalImageUrl,
       sleepingImageUrl: sleepingImageUrl ?? this.sleepingImageUrl,
       failedImageUrl: failedImageUrl ?? this.failedImageUrl,
+      avatarStatesVersion: avatarStatesVersion ?? this.avatarStatesVersion,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       isLocalAsset: isLocalAsset ?? this.isLocalAsset,
@@ -140,8 +158,33 @@ class CustomPet {
 
 DateTime _parseDateTime(dynamic value) {
   if (value is DateTime) return value;
-  if (value is String) return DateTime.parse(value);
+  if (value is String) {
+    return DateTime.tryParse(value) ?? DateTime.now();
+  }
   return DateTime.now();
+}
+
+String _requiredString(dynamic value, String fieldName) {
+  if (value is String && value.trim().isNotEmpty) {
+    return value.trim();
+  }
+  throw FormatException('CustomPet missing required field: $fieldName');
+}
+
+String _optionalString(dynamic value) {
+  return value is String ? value.trim() : '';
+}
+
+int _optionalInt(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? 0;
+  return 0;
+}
+
+String? _normalizeSpecies(dynamic value) {
+  if (value == 'cat' || value == 'dog') return value as String;
+  return null;
 }
 
 class StorageService {
@@ -178,11 +221,20 @@ class StorageService {
   // 獲取歷史紀錄列表（最新的排在最前面）
   List<FocusRecord> get focusHistory {
     final jsonList = _prefs.getStringList(_historyKey) ?? [];
-    return jsonList
-        .map((jsonStr) => FocusRecord.fromJson(jsonDecode(jsonStr)))
-        .toList()
-        .reversed
-        .toList();
+    final records = <FocusRecord>[];
+    for (final jsonStr in jsonList) {
+      try {
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is Map<String, dynamic>) {
+          records.add(FocusRecord.fromJson(decoded));
+        } else if (decoded is Map) {
+          records.add(FocusRecord.fromJson(Map<String, dynamic>.from(decoded)));
+        }
+      } catch (error) {
+        debugPrint('略過無法解析的專注歷史紀錄: $error');
+      }
+    }
+    return records.reversed.toList();
   }
 
   // 增加專注次數
@@ -210,6 +262,40 @@ class StorageService {
     await _prefs.setStringList(_historyKey, jsonList);
   }
 
+  /// 移除指定寵物的夢境故事紀錄。
+  Future<int> removeFocusRecordsForPet(String petId, {String? petName}) async {
+    final jsonList = _prefs.getStringList(_historyKey) ?? [];
+    final normalizedPetName = petName?.trim();
+    var removedCount = 0;
+    final keptRecords = <String>[];
+
+    for (final jsonStr in jsonList) {
+      try {
+        final record = FocusRecord.fromJson(jsonDecode(jsonStr));
+        final isSamePetId = record.petId == petId;
+        final isLegacyRecordForPet =
+            (record.petId == null || record.petId?.isEmpty == true) &&
+                normalizedPetName != null &&
+                normalizedPetName.isNotEmpty &&
+                record.petName?.trim() == normalizedPetName;
+
+        if (isSamePetId || isLegacyRecordForPet) {
+          removedCount += 1;
+          continue;
+        }
+      } catch (_) {
+        // 舊資料若解析失敗則保留，避免刪除無法識別的使用者紀錄。
+      }
+
+      keptRecords.add(jsonStr);
+    }
+
+    if (removedCount > 0) {
+      await _prefs.setStringList(_historyKey, keptRecords);
+    }
+    return removedCount;
+  }
+
   // 前進到下一個故事
   Future<void> incrementStoryIndex([int? totalStories]) async {
     final currentIndex = storyIndex;
@@ -221,9 +307,20 @@ class StorageService {
   /// 獲取所有自定義寵物
   List<CustomPet> get customPets {
     final jsonList = _prefs.getStringList(_customPetsKey) ?? [];
-    return jsonList
-        .map((jsonStr) => CustomPet.fromJson(jsonDecode(jsonStr)))
-        .toList();
+    final pets = <CustomPet>[];
+    for (final jsonStr in jsonList) {
+      try {
+        final decoded = jsonDecode(jsonStr);
+        if (decoded is Map<String, dynamic>) {
+          pets.add(CustomPet.fromJson(decoded));
+        } else if (decoded is Map) {
+          pets.add(CustomPet.fromJson(Map<String, dynamic>.from(decoded)));
+        }
+      } catch (error) {
+        debugPrint('略過無法解析的寵物資料: $error');
+      }
+    }
+    return pets;
   }
 
   /// 獲取當前選定的寵物 ID

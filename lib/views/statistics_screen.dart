@@ -67,8 +67,15 @@ class StatisticsScreen extends StatelessWidget {
     int streak,
   ) {
     final now = DateTime.now();
-    final dateStr =
-        '${now.month}/${now.day}（${{1: '一', 2: '二', 3: '三', 4: '四', 5: '五', 6: '六', 7: '日'}[now.weekday]}）';
+    final dateStr = '${now.month}/${now.day}（${{
+      1: '一',
+      2: '二',
+      3: '三',
+      4: '四',
+      5: '五',
+      6: '六',
+      7: '日'
+    }[now.weekday]}）';
 
     return Container(
       width: double.infinity,
@@ -78,7 +85,7 @@ class StatisticsScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -92,7 +99,8 @@ class StatisticsScreen extends StatelessWidget {
             children: [
               const Row(
                 children: [
-                  Icon(Icons.pets, size: 22, color: AppConstants.primaryButtonColor),
+                  Icon(Icons.pets,
+                      size: 22, color: AppConstants.primaryButtonColor),
                   SizedBox(width: 8),
                   Text(
                     '今日專注',
@@ -106,14 +114,17 @@ class StatisticsScreen extends StatelessWidget {
               ),
               Row(
                 children: [
-                  Icon(Icons.calendar_today_rounded, size: 16,
-                    color: AppConstants.primaryTextColor.withOpacity(0.5)),
-                  SizedBox(width: 4),
+                  Icon(Icons.calendar_today_rounded,
+                      size: 16,
+                      color:
+                          AppConstants.primaryTextColor.withValues(alpha: 0.5)),
+                  const SizedBox(width: 4),
                   Text(
                     dateStr,
                     style: TextStyle(
                       fontSize: 14,
-                      color: AppConstants.primaryTextColor.withOpacity(0.5),
+                      color:
+                          AppConstants.primaryTextColor.withValues(alpha: 0.5),
                     ),
                   ),
                 ],
@@ -126,11 +137,12 @@ class StatisticsScreen extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _buildStatItem(Icons.local_fire_department_rounded, '$todayCount', '次'),
+              _buildStatItem(
+                  Icons.local_fire_department_rounded, '$todayCount', '次'),
               Container(
                 width: 1,
                 height: 40,
-                color: AppConstants.primaryTextColor.withOpacity(0.1),
+                color: AppConstants.primaryTextColor.withValues(alpha: 0.1),
               ),
               _buildStatItem(Icons.timer_outlined, '$todayMinutes', '分鐘'),
             ],
@@ -138,7 +150,7 @@ class StatisticsScreen extends StatelessWidget {
 
           // Streak 分隔線
           const SizedBox(height: 16),
-          Divider(color: AppConstants.primaryTextColor.withOpacity(0.08)),
+          Divider(color: AppConstants.primaryTextColor.withValues(alpha: 0.08)),
           const SizedBox(height: 12),
 
           // Streak 顯示
@@ -150,7 +162,7 @@ class StatisticsScreen extends StatelessWidget {
                 size: 24,
                 color: streak > 0
                     ? AppConstants.streakFireColor
-                    : AppConstants.primaryTextColor.withOpacity(0.4),
+                    : AppConstants.primaryTextColor.withValues(alpha: 0.4),
               ),
               const SizedBox(width: 8),
               Text(
@@ -160,7 +172,7 @@ class StatisticsScreen extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                   color: streak > 0
                       ? AppConstants.streakFireColor
-                      : AppConstants.primaryTextColor.withOpacity(0.5),
+                      : AppConstants.primaryTextColor.withValues(alpha: 0.5),
                 ),
               ),
             ],
@@ -194,7 +206,7 @@ class StatisticsScreen extends StatelessWidget {
                 unit,
                 style: TextStyle(
                   fontSize: 14,
-                  color: AppConstants.primaryTextColor.withOpacity(0.6),
+                  color: AppConstants.primaryTextColor.withValues(alpha: 0.6),
                 ),
               ),
             ),
@@ -218,7 +230,7 @@ class StatisticsScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -229,7 +241,8 @@ class StatisticsScreen extends StatelessWidget {
         children: [
           const Row(
             children: [
-              Icon(Icons.show_chart_rounded, size: 22, color: AppConstants.primaryButtonColor),
+              Icon(Icons.show_chart_rounded,
+                  size: 22, color: AppConstants.primaryButtonColor),
               SizedBox(width: 8),
               Text(
                 '本週專注趨勢',
@@ -268,7 +281,7 @@ class StatisticsScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -279,7 +292,8 @@ class StatisticsScreen extends StatelessWidget {
         children: [
           const Row(
             children: [
-              Icon(Icons.assessment_outlined, size: 22, color: AppConstants.primaryButtonColor),
+              Icon(Icons.assessment_outlined,
+                  size: 22, color: AppConstants.primaryButtonColor),
               SizedBox(width: 8),
               Text(
                 '本週總覽',
@@ -311,7 +325,7 @@ class StatisticsScreen extends StatelessWidget {
           label,
           style: TextStyle(
             fontSize: 15,
-            color: AppConstants.primaryTextColor.withOpacity(0.7),
+            color: AppConstants.primaryTextColor.withValues(alpha: 0.7),
           ),
         ),
         Text(

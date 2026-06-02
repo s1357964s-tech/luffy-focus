@@ -49,8 +49,12 @@ class RewardModal extends StatelessWidget {
                   ? FirebaseStorageImage(
                       imageUrl: petImageUrl,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __) => const Icon(Icons.pets,
-                          size: 40, color: AppConstants.primaryButtonColor),
+                      errorBuilder: (_, __, retry) => IconButton(
+                        tooltip: '重新載入圖片',
+                        icon: const Icon(Icons.refresh),
+                        color: AppConstants.primaryButtonColor,
+                        onPressed: retry,
+                      ),
                     )
                   : Image.asset(
                       petImageUrl,

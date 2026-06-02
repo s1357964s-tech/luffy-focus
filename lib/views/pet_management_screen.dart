@@ -61,9 +61,7 @@ class PetManagementScreen extends StatelessWidget {
                       child: _buildPetCard(
                         context: context,
                         name: pet.name,
-                        subtitle: pet.species == 'cat'
-                            ? '貓咪'
-                            : (pet.species == 'dog' ? '狗狗' : '兔子'),
+                        subtitle: pet.species == 'cat' ? '貓咪' : '狗狗',
                         imageUrl: pet.normalImageUrl,
                         isSelected: selectedId == pet.id,
                         isNetworkImage: !pet.isLocalAsset,
@@ -155,11 +153,15 @@ class PetManagementScreen extends StatelessWidget {
                       width: 60,
                       height: 60,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __) => Container(
+                      errorBuilder: (_, __, retry) => Container(
                           width: 60,
                           height: 60,
                           color: Colors.grey[200],
-                          child: const Icon(Icons.error)),
+                          child: IconButton(
+                            tooltip: '重新載入圖片',
+                            icon: const Icon(Icons.refresh, size: 20),
+                            onPressed: retry,
+                          )),
                     )
                   : Image.asset(
                       imageUrl,
@@ -237,18 +239,22 @@ class PetManagementScreen extends StatelessWidget {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('刪除寵物'),
-        content: Text('確定要刪除「${pet.name}」嗎？這會移除牠的照片與生成圖。'),
+        content: Text(
+          '確定要刪除「${pet.name}」嗎？這會移除牠的照片、生成圖與夢境故事，無法復原。',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('取消'),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text(
-              '刪除',
-              style: TextStyle(color: Colors.redAccent),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(76, 44),
             ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('刪除'),
           ),
         ],
       ),

@@ -2,8 +2,55 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && request.resource.data.keys().hasOnly([
+          'createdAt',
+          'selectedPetId',
+          'updatedAt',
+        ]);
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'createdAt',
+          'selectedPetId',
+          'updatedAt',
+        ]);
+
+      match /iapTransactions/{transactionId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      match /petPurchaseCredits/{creditId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+
+      match /pets/{petId} {
+        allow read: if isOwner(userId);
+        allow create, update: if false;
+        allow delete: if isOwner(userId)
+          && resource.data.status == 'ready';
+      }
+
+      match /stories/{storyId} {
+        allow read, delete: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && request.resource.data.keys().hasOnly([
+            'createdAt',
+            'focusMinutes',
+            'petId',
+            'petName',
+            'species',
+            'storyText',
+          ]);
+        allow update: if false;
+      }
     }
   }
 }

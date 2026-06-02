@@ -104,6 +104,7 @@ class NotificationService {
     required String petName,
     required String species,
   }) async {
+    await _ensureInitialized();
     if (!_isInitialized || _plugin == null) return;
 
     try {
@@ -152,13 +153,13 @@ class NotificationService {
   String _soundNameForSpecies(String species) {
     return switch (species) {
       'cat' => 'luffy_cat',
-      'rabbit' => 'luffy_rabbit',
       _ => 'luffy_dog',
     };
   }
 
   /// 取消所有通知（用戶返回 App 時清除）
   Future<void> cancelAll() async {
+    await _ensureInitialized();
     if (!_isInitialized || _plugin == null) return;
     try {
       await _plugin!.cancelAll();

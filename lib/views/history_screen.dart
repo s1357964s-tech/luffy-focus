@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/constants.dart';
+import '../services/storage_service.dart' show CustomPet;
+import '../viewmodels/pet_viewmodel.dart';
 import '../viewmodels/timer_provider.dart';
 
 class HistoryScreen extends StatelessWidget {
@@ -9,7 +11,11 @@ class HistoryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final timerProvider = context.watch<TimerProvider>();
+    final petViewModel = context.watch<PetViewModel>();
     final history = timerProvider.focusHistory;
+    final customPets = petViewModel.customPets;
+    final petTabs = _buildPetTabs(customPets);
+    final shouldShowTabs = customPets.isNotEmpty;
 
     return Scaffold(
       backgroundColor: AppConstants.backgroundColor,
@@ -21,8 +27,73 @@ class HistoryScreen extends StatelessWidget {
       ),
       body: history.isEmpty
           ? _buildEmptyState(context)
-          : _buildHistoryList(context, history),
+          : shouldShowTabs
+              ? _buildTabbedHistory(context, history, petTabs)
+              : _buildHistoryList(context, history),
     );
+  }
+
+  List<_PetHistoryTab> _buildPetTabs(List<CustomPet> customPets) {
+    return [
+      const _PetHistoryTab(id: 'luffy', name: '路飛', isLuffy: true),
+      ...customPets.map((pet) => _PetHistoryTab(id: pet.id, name: pet.name)),
+    ];
+  }
+
+  Widget _buildTabbedHistory(
+    BuildContext context,
+    List<FocusRecord> history,
+    List<_PetHistoryTab> petTabs,
+  ) {
+    return DefaultTabController(
+      length: petTabs.length,
+      child: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            color: AppConstants.backgroundColor,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: TabBar(
+              isScrollable: true,
+              dividerColor: Colors.transparent,
+              labelColor: Colors.white,
+              unselectedLabelColor: AppConstants.primaryTextColor,
+              labelStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+              unselectedLabelStyle: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: BoxDecoration(
+                color: AppConstants.primaryButtonColor,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              tabs: petTabs
+                  .map((tab) => Tab(text: _tabLabel(tab, history)))
+                  .toList(),
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              children: petTabs.map((tab) {
+                final records = _recordsForTab(history, tab);
+                return records.isEmpty
+                    ? _buildEmptyPetState(context, tab)
+                    : _buildHistoryList(context, records);
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _tabLabel(_PetHistoryTab tab, List<FocusRecord> history) {
+    final count = _recordsForTab(history, tab).length;
+    return '${tab.name} $count';
   }
 
   // 尚無紀錄時的空狀態畫面
@@ -34,7 +105,7 @@ class HistoryScreen extends StatelessWidget {
           Icon(
             Icons.history,
             size: 64,
-            color: AppConstants.primaryTextColor.withOpacity(0.3),
+            color: AppConstants.primaryTextColor.withValues(alpha: 0.3),
           ),
           const SizedBox(height: 16),
           Text(
@@ -42,11 +113,28 @@ class HistoryScreen extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,
-              color: AppConstants.primaryTextColor.withOpacity(0.5),
+              color: AppConstants.primaryTextColor.withValues(alpha: 0.5),
               height: 1.6,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyPetState(BuildContext context, _PetHistoryTab tab) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Text(
+          '還沒有${tab.name}的夢境故事',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 16,
+            color: AppConstants.primaryTextColor.withValues(alpha: 0.5),
+            height: 1.6,
+          ),
+        ),
       ),
     );
   }
@@ -63,6 +151,27 @@ class HistoryScreen extends StatelessWidget {
     );
   }
 
+  List<FocusRecord> _recordsForTab(
+    List<FocusRecord> history,
+    _PetHistoryTab tab,
+  ) {
+    return history.where((record) {
+      final recordPetId = record.petId;
+      if (tab.isLuffy) {
+        if (recordPetId == 'luffy') return true;
+        if (recordPetId != null && recordPetId.isNotEmpty) return false;
+        final recordPetName = record.petName?.trim();
+        return recordPetName == null ||
+            recordPetName.isEmpty ||
+            recordPetName == '路飛';
+      }
+
+      if (recordPetId == tab.id) return true;
+      if (recordPetId != null && recordPetId.isNotEmpty) return false;
+      return record.petName?.trim() == tab.name;
+    }).toList();
+  }
+
   // 單張歷史紀錄卡片
   Widget _buildHistoryCard(
     BuildContext context,
@@ -73,11 +182,10 @@ class HistoryScreen extends StatelessWidget {
     // 從故事文字中擷取標題（【...】之間的文字）
     final titleMatch = RegExp(r'【(.+?)】').firstMatch(record.storyText);
     final title = titleMatch != null ? titleMatch.group(1)! : '路飛的夢境';
-    
+
     // 去掉標題後的純故事內容
-    final storyBody = record.storyText
-        .replaceFirst(RegExp(r'【.+?】\n?'), '')
-        .trim();
+    final storyBody =
+        record.storyText.replaceFirst(RegExp(r'【.+?】\n?'), '').trim();
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -97,7 +205,8 @@ class HistoryScreen extends StatelessWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: AppConstants.primaryButtonColor.withOpacity(0.15),
+                  color:
+                      AppConstants.primaryButtonColor.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: Center(
@@ -130,7 +239,8 @@ class HistoryScreen extends StatelessWidget {
                       _formatDateTime(record.completedAt),
                       style: TextStyle(
                         fontSize: 13,
-                        color: AppConstants.primaryTextColor.withOpacity(0.5),
+                        color: AppConstants.primaryTextColor
+                            .withValues(alpha: 0.5),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -141,7 +251,8 @@ class HistoryScreen extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 14,
                         height: 1.5,
-                        color: AppConstants.primaryTextColor.withOpacity(0.7),
+                        color: AppConstants.primaryTextColor
+                            .withValues(alpha: 0.7),
                       ),
                     ),
                   ],
@@ -150,7 +261,7 @@ class HistoryScreen extends StatelessWidget {
               // 箭頭
               Icon(
                 Icons.chevron_right,
-                color: AppConstants.primaryTextColor.withOpacity(0.3),
+                color: AppConstants.primaryTextColor.withValues(alpha: 0.3),
               ),
             ],
           ),
@@ -216,7 +327,8 @@ class HistoryScreen extends StatelessWidget {
                       '完成於 ${_formatDateTime(record.completedAt)}',
                       style: TextStyle(
                         fontSize: 13,
-                        color: AppConstants.primaryTextColor.withOpacity(0.5),
+                        color: AppConstants.primaryTextColor
+                            .withValues(alpha: 0.5),
                       ),
                     ),
                   ],
@@ -262,4 +374,16 @@ class HistoryScreen extends StatelessWidget {
     final minute = dateTime.minute.toString().padLeft(2, '0');
     return '$year/$month/$day $hour:$minute';
   }
+}
+
+class _PetHistoryTab {
+  final String id;
+  final String name;
+  final bool isLuffy;
+
+  const _PetHistoryTab({
+    required this.id,
+    required this.name,
+    this.isLuffy = false,
+  });
 }

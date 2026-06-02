@@ -98,7 +98,7 @@ class _WeeklyBarChartState extends State<WeeklyBarChart>
             fontWeight: FontWeight.bold,
             color: isToday
                 ? AppConstants.chartBarColor
-                : AppConstants.primaryTextColor.withOpacity(0.5),
+                : AppConstants.primaryTextColor.withValues(alpha: 0.5),
           ),
         ),
         const SizedBox(height: 4),
@@ -122,7 +122,7 @@ class _WeeklyBarChartState extends State<WeeklyBarChart>
             fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
             color: isToday
                 ? AppConstants.primaryTextColor
-                : AppConstants.primaryTextColor.withOpacity(0.5),
+                : AppConstants.primaryTextColor.withValues(alpha: 0.5),
           ),
         ),
       ],

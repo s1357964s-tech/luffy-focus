@@ -21,6 +21,11 @@ dependencies:
   cloud_firestore: ^6.3.0
   cloud_functions: ^6.3.1
   firebase_storage: ^13.3.0
+  in_app_purchase: ^3.2.3
+  in_app_purchase_storekit: ^0.4.9
+  http: ^1.5.0
+  audioplayers: ^6.7.0
+  permission_handler: ^12.0.3
 
 dev_dependencies:
   flutter_test:
@@ -37,3 +42,5 @@ flutter:
     - assets/images/mock/mock_cat_normal.png
     - assets/images/mock/mock_cat_sleeping.png
     - assets/images/mock/mock_cat_failed.png
+    - assets/audio/luffy_dog_complete.wav
+    - assets/audio/luffy_cat_complete.wav

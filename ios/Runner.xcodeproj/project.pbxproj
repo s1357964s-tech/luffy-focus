@@ -17,10 +17,9 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		A14F4E7E2FB9EDB20049F483 /* GoogleService-Info (1).plist in Resources */ = {isa = PBXBuildFile; fileRef = A14F4E7D2FB9EDB20049F483 /* GoogleService-Info (1).plist */; };
+		AD3AEB143D164F09AD57EA29 /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2B133DD6C4374EFD60010317 /* Pods_RunnerTests.framework */; };
 		B7F001012ECF000100000001 /* luffy_dog.wav in Resources */ = {isa = PBXBuildFile; fileRef = B7F001002ECF000100000001 /* luffy_dog.wav */; };
 		B7F001032ECF000100000001 /* luffy_cat.wav in Resources */ = {isa = PBXBuildFile; fileRef = B7F001022ECF000100000001 /* luffy_cat.wav */; };
-		B7F001052ECF000100000001 /* luffy_rabbit.wav in Resources */ = {isa = PBXBuildFile; fileRef = B7F001042ECF000100000001 /* luffy_rabbit.wav */; };
-		AD3AEB143D164F09AD57EA29 /* Pods_RunnerTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2B133DD6C4374EFD60010317 /* Pods_RunnerTests.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,7 +73,6 @@
 		A14F4E7D2FB9EDB20049F483 /* GoogleService-Info (1).plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info (1).plist"; sourceTree = "<group>"; };
 		B7F001002ECF000100000001 /* luffy_dog.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = luffy_dog.wav; sourceTree = "<group>"; };
 		B7F001022ECF000100000001 /* luffy_cat.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = luffy_cat.wav; sourceTree = "<group>"; };
-		B7F001042ECF000100000001 /* luffy_rabbit.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = luffy_rabbit.wav; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -152,7 +150,6 @@
 				A14F4E7D2FB9EDB20049F483 /* GoogleService-Info (1).plist */,
 				B7F001002ECF000100000001 /* luffy_dog.wav */,
 				B7F001022ECF000100000001 /* luffy_cat.wav */,
-				B7F001042ECF000100000001 /* luffy_rabbit.wav */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -213,6 +210,7 @@
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				87A0EC06A54E20F65C2430C3 /* [CP] Embed Pods Frameworks */,
+				09F5C181E77AA51104C29E06 /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -240,6 +238,11 @@
 					97C146ED1CF9000F007C117D = {
 						CreatedOnToolsVersion = 7.3.1;
 						LastSwiftMigration = 1100;
+						SystemCapabilities = {
+							com.apple.InAppPurchase = {
+								enabled = 1;
+							};
+						};
 					};
 				};
 			};
@@ -282,7 +285,6 @@
 				A14F4E7E2FB9EDB20049F483 /* GoogleService-Info (1).plist in Resources */,
 				B7F001012ECF000100000001 /* luffy_dog.wav in Resources */,
 				B7F001032ECF000100000001 /* luffy_cat.wav in Resources */,
-				B7F001052ECF000100000001 /* luffy_rabbit.wav in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
 			);
@@ -291,6 +293,23 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		09F5C181E77AA51104C29E06 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-resources.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
 		3260F2AEDF973CC6C26AB7EA /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
