@@ -8,6 +8,8 @@
 - 圖片辨識與故事模型為 `gemini-2.5-flash`；生圖模型為 [`gemini-3-pro-image`](https://ai.google.dev/gemini-api/docs/models/gemini-3-pro-image)。
 - 後端部署使用 Node.js 22。Google 已於 2026-10-30 停止接受 Node.js 20 的部署。
 - 生成圖片依模型回傳的 MIME 儲存：JPEG 使用 `.jpg`／`image/jpeg`，PNG 與 WebP 也保留對應格式。
+- 照片辨識使用 `thinkingBudget=0`、1024 個輸出 tokens，避免短 JSON 被思考預算截斷；僅記錄 token／完成原因等診斷資訊。
+- 已驗證 Apple 訂單會寫入全域 `appStoreTransactions/{environment}_{transactionId}` owner 索引，防止同一訂單跨帳號重複入帳。生成中的預留名額有 330 秒 lease；等待命名的完成草稿不以這個短 lease 退回。
 - 目前 Firebase 設定僅支援 iOS；GitHub 更新不會自動部署 Functions，也不會建立可使用的 Flutter Web 版本。
 
 ## 1. 创建 Firebase 项目
@@ -114,6 +116,14 @@ npx -p node@22 -p firebase-tools firebase functions:secrets:set GEMINI_API_KEY -
 ```
 
 ## 7. 安装和部署 Functions
+
+2026-11-24 的完整內購／生圖驗收已更新以下八個函式至 Node.js 22（故事函式不在本輪變更內）：
+
+```bash
+firebase deploy --only functions:analyzePetImage,functions:generatePetAvatar,functions:generatePetAvatarStates,functions:repairPetAvatarStates,functions:getCustomPetPurchaseCredit,functions:verifyCustomPetPurchase,functions:saveGeneratedPetName,functions:releaseCustomPetPurchaseCredit --project luffy-focus
+```
+
+本輪另已部署儲存在 repo 的 `firestore.rules`，禁止客戶端改寫訂單、名額及生成資料；詳見 `APP_STORE_RELEASE_CHECKLIST.md` 的逐項驗收結果。
 
 本次只更新生圖功能時，先驗證，再限定部署三個函式。其餘既有函式不會在這次發布中升級 runtime：
 

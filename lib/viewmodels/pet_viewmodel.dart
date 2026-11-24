@@ -183,6 +183,12 @@ class PetViewModel extends ChangeNotifier {
     required String imageMimeType,
     required String featureNote,
   }) async {
+    // 增加防刷/防連點機制：若正在分析或生成中，則忽略新的請求
+    if (_uploadState == PetUploadState.analyzing ||
+        _uploadState == PetUploadState.generating) {
+      return;
+    }
+
     // 檢查是否超過上限（含路飛共 3 個，自定義最多 2 個）
     if (isAtPetLimit) {
       _uploadState = PetUploadState.error;

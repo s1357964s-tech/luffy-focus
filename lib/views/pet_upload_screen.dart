@@ -26,8 +26,10 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
   bool _allowPop = false;
   bool _isLeaving = false;
   bool _isSavingName = false;
+
   /// 是否正在等待後端收據驗證（Apple 已確認付款但後端尚未回應）
   bool _isPurchaseVerifying = false;
+
   /// 是否正在手動查詢訂單狀態（「我已支付」的載入狀態）
   bool _isManualChecking = false;
   StreamSubscription<CustomPetPurchaseOutcome>? _purchaseOutcomeSubscription;
@@ -56,6 +58,41 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
   /// 發起購買（fire-and-forget），結果統一由 [_handlePurchaseOutcome] 處理
   Future<void> _startPurchaseFlow(BuildContext context) async {
     await context.read<BillingService>().purchaseCustomPetUnlock();
+  }
+
+  /// 發起恢復購買，完成後比對名額並給予使用者對應的回饋提示
+  Future<void> _restorePurchases(BuildContext context) async {
+    final billingService = context.read<BillingService>();
+    final oldCredits = billingService.unusedCredits;
+
+    try {
+      await billingService.restorePurchases();
+      if (!context.mounted) return;
+
+      final newCredits = billingService.unusedCredits;
+      if (newCredits > oldCredits) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已成功恢復購買！'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('未找到可恢復的購買記錄。'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('恢復購買時出錯：$e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 
   /// 收到 StoreKit 彈窗即時結果後的處理邏輯
@@ -125,7 +162,8 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
     try {
       final billingService = context.read<BillingService>();
       // 重新向後端請求 credit 狀態
-      await billingService.refreshCustomPetCredit(timeout: const Duration(seconds: 15));
+      await billingService.refreshCustomPetCredit(
+          timeout: const Duration(seconds: 15));
 
       if (!context.mounted) return;
 
@@ -426,8 +464,9 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
     BuildContext context,
     BillingService billingService,
   ) {
-    final isBusy =
+    final isBusy = billingService.isPaymentPending ||
         billingService.state == CustomPetPurchaseState.purchasing ||
+        billingService.state == CustomPetPurchaseState.pending ||
         billingService.state == CustomPetPurchaseState.loading;
 
     return Column(
@@ -472,6 +511,18 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
                 )
               : Text('購買解鎖名額 ${billingService.customPetPriceLabel}'),
         ),
+        const SizedBox(height: 16),
+        TextButton(
+          onPressed: isBusy ? null : () => _restorePurchases(context),
+          child: const Text(
+            '恢復購買',
+            style: TextStyle(
+              color: AppConstants.primaryButtonColor,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -501,7 +552,7 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
           child: Text(
-            '若確認時間較長，您可點擊下方按鈕手動刷新狀態。點擊「放棄支付」可先返回，確認成功後您將自動獲得解鎖額度。',
+            '付款紀錄會保留。您可點擊「我已支付」重新確認，或先返回稍後處理；不需要再次購買。',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: AppConstants.primaryTextColor.withValues(alpha: 0.6),
@@ -533,7 +584,7 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
                     ),
                     foregroundColor: AppConstants.primaryTextColor,
                   ),
-                  child: const Text('放棄支付'),
+                  child: const Text('稍後處理'),
                 ),
               ),
               const SizedBox(width: 12),
@@ -563,8 +614,6 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
       ],
     );
   }
-
-
 
   Widget _buildSelectedImageUI(
     BuildContext context,
@@ -753,21 +802,9 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
                     try {
                       await viewModel.savePetNameAndFinish(name);
                       if (context.mounted) {
-                        final newPet = viewModel.customPets.firstWhere(
-                          (p) => p.id == viewModel.completedPetId,
-                          orElse: () => viewModel.customPets.firstWhere(
-                            (p) => p.id == viewModel.selectedPetId,
-                          ),
-                        );
-                        if (newPet.isLocalAsset) {
-                          await context
-                              .read<BillingService>()
-                              .consumeLocalFallbackCredit();
-                        } else {
-                          await context
-                              .read<BillingService>()
-                              .refreshCustomPetCredit();
-                        }
+                        await context
+                            .read<BillingService>()
+                            .refreshCustomPetCredit();
                       }
                       if (context.mounted) {
                         await _precacheSavedPetImages(viewModel);

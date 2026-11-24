@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
@@ -110,44 +108,6 @@ class AiPetService {
         rethrow;
       }
 
-      // Check if it's a network, TLS, handshake or timeout error (case-insensitive)
-      final normalized = e.toString().toLowerCase();
-      
-      // 為什麼這樣設計 (Why)：
-      // 當大陸用戶在無 VPN 的受限網路下透過「本地降級支付」獲得自定義寵物名額後，後端 Firestore 並無該筆 credit 紀錄。
-      // 用戶在此狀態下點擊送出，若此時網絡連通（或配置了閘道），呼叫後端會回傳 "please purchase a custom pet..." 的業務錯誤。
-      // 為了避免流程中斷，我們必須在此處攔截該錯誤，並將其視同網路連線異常處理，直接觸發本地 Mock 橘貓生成降級。
-      final isNetworkError = e is TimeoutException ||
-          normalized.contains('network error') ||
-          normalized.contains('timeout') ||
-          normalized.contains('tls') ||
-          normalized.contains('secure connection') ||
-          normalized.contains('handshake') ||
-          normalized.contains('connection terminated during handshake') ||
-          normalized.contains('unreachable') ||
-          normalized.contains('unavailable') ||
-          normalized.contains('host') ||
-          normalized.contains('please purchase a custom pet') ||
-          (e is FirebaseFunctionsException && (
-              e.code == 'unavailable' ||
-              e.code == 'deadline-exceeded' ||
-              e.code == 'failed-precondition' ||
-              e.message?.toLowerCase().contains('network error') == true
-          ));
-
-      if (isNetworkError) {
-        debugPrint('[PetAnalysis] 檢測到網路連線失敗或後端額度未同步，自動啟用本地 Mock 模式。');
-        isMockMode = true;
-        return const PetImageAnalysis(
-          isPet: true,
-          species: 'cat',
-          breed: 'orange tabby',
-          breedConfidence: 0.95,
-          breedTraits: '橘貓性格溫順，愛撒嬌，非常親人，且通常體型較為圓潤。',
-          visualTraits: ['橘色條紋', '短毛', '圓臉', '黃色眼睛'],
-        );
-      }
-
       isMockMode = false;
       throw Exception(_readableFunctionError(e, '寵物圖片辨識失敗，請稍後再試。'));
     }
@@ -207,42 +167,6 @@ class AiPetService {
         '[PetAvatar] generatePetAvatar failed petId=$petId '
         'elapsedMs=${stopwatch.elapsedMilliseconds} error=$e',
       );
-
-      // Check if it's a network, TLS, handshake or timeout error (case-insensitive)
-      final normalized = e.toString().toLowerCase();
-      
-      // 為什麼這樣設計 (Why)：
-      // 當大陸用戶在無 VPN 的受限網路下透過「本地降級支付」獲得自定義寵物名額後，後端 Firestore 並無該筆 credit 紀錄。
-      // 用戶在此狀態下進行生圖，若此時網絡連通（或配置了閘道），呼叫後端會回傳 "please purchase a custom pet..." 的業務錯誤。
-      // 為了避免流程中斷，我們必須在此處攔截該錯誤，並將其視同網路連線異常處理，直接觸發本地 Mock 圖片路徑降級。
-      final isNetworkError = e is TimeoutException ||
-          normalized.contains('network error') ||
-          normalized.contains('timeout') ||
-          normalized.contains('tls') ||
-          normalized.contains('secure connection') ||
-          normalized.contains('handshake') ||
-          normalized.contains('connection terminated during handshake') ||
-          normalized.contains('unreachable') ||
-          normalized.contains('unavailable') ||
-          normalized.contains('host') ||
-          normalized.contains('please purchase a custom pet') ||
-          (e is FirebaseFunctionsException && (
-              e.code == 'unavailable' ||
-              e.code == 'deadline-exceeded' ||
-              e.code == 'failed-precondition' ||
-              e.message?.toLowerCase().contains('network error') == true
-          ));
-
-      if (isNetworkError) {
-        debugPrint('[PetAvatar] 檢測到網路連線失敗或後端額度未同步，自動啟用本地 Mock 生成。');
-        isMockMode = true;
-        return const PetAvatarResult(
-          normalImageUrl: 'assets/images/mock/mock_cat_normal.png',
-          sleepingImageUrl: 'assets/images/mock/mock_cat_sleeping.png',
-          failedImageUrl: 'assets/images/mock/mock_cat_failed.png',
-          originalImagePath: null,
-        );
-      }
 
       isMockMode = false;
       throw Exception(_readableFunctionError(e, '寵物卡通圖生成失敗，請稍後再試。'));

@@ -15,6 +15,7 @@ const GEMINI_IMAGE_MODEL = 'gemini-3-pro-image';
 const AVATAR_BACKGROUND_COLOR = '#FDF6E3';
 const CUSTOM_PET_PRODUCT_ID = 'luffy.custom_pet.create.v1';
 const CUSTOM_PET_CREDIT_DOC_ID = 'custom_pet_create';
+const CUSTOM_PET_GENERATION_LEASE_MS = 330000;
 const IOS_BUNDLE_ID = 'com.stevehu.luffyFocus';
 const APPLE_VERIFY_RECEIPT_PRODUCTION = 'https://buy.itunes.apple.com/verifyReceipt';
 const APPLE_VERIFY_RECEIPT_SANDBOX = 'https://sandbox.itunes.apple.com/verifyReceipt';
@@ -172,7 +173,31 @@ async function callGemini({ apiKey, parts, json = false, generationConfig = {} }
     },
   );
 
-  const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const candidate = response.data?.candidates?.[0];
+  if (json) {
+    const usage = response.data?.usageMetadata || {};
+    const responseParts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    logger.info('Gemini JSON response received', {
+      modelVersion: response.data?.modelVersion || GEMINI_TEXT_MODEL,
+      responseId: response.data?.responseId || '',
+      finishReason: candidate?.finishReason || '',
+      candidateCount: response.data?.candidates?.length || 0,
+      promptBlockReason: response.data?.promptFeedback?.blockReason || '',
+      parts: responseParts.map((part) => ({
+        thought: part.thought === true,
+        textLength: typeof part.text === 'string' ? part.text.length : 0,
+      })),
+      promptTokenCount: usage.promptTokenCount || 0,
+      candidatesTokenCount: usage.candidatesTokenCount || 0,
+      thoughtsTokenCount: usage.thoughtsTokenCount || 0,
+      totalTokenCount: usage.totalTokenCount || 0,
+    });
+    if (candidate?.finishReason === 'MAX_TOKENS') {
+      throw new HttpsError('unavailable', 'Pet image analysis response was truncated. Please retry.');
+    }
+  }
+
+  const text = candidate?.content?.parts?.[0]?.text;
   if (!text) {
     throw new HttpsError('internal', 'Gemini returned an empty response.');
   }
@@ -334,19 +359,18 @@ async function assertHasCustomPetCredit(uid) {
   }
 }
 
-async function reserveCustomPetCredit(uid, petId) {
+async function reserveCustomPetCredit(uid, petId, reservationId = randomUUID()) {
   const petRef = db.doc(`users/${uid}/pets/${petId}`);
   const creditRef = db.doc(`users/${uid}/petPurchaseCredits/${CUSTOM_PET_CREDIT_DOC_ID}`);
-  let newlyReserved = false;
 
-  await db.runTransaction(async (transaction) => {
+  return db.runTransaction(async (transaction) => {
     const [petSnapshot, creditSnapshot] = await Promise.all([
       transaction.get(petRef),
       transaction.get(creditRef),
     ]);
     const pet = petSnapshot.data() || {};
     if (pet.purchaseStatus === 'reserved') {
-      return;
+      return false;
     }
     if (pet.purchaseStatus === 'consumed') {
       throw new HttpsError('failed-precondition', 'This pet creation credit has already been consumed.');
@@ -364,17 +388,34 @@ async function reserveCustomPetCredit(uid, petId) {
       updatedAt: now,
     }, { merge: true });
     transaction.set(petRef, {
+      status: 'generating',
       purchaseStatus: 'reserved',
+      purchaseReservationId: reservationId,
+      purchaseReservationExpiresAtMs: Date.now() + CUSTOM_PET_GENERATION_LEASE_MS,
       purchaseReservedAt: now,
       updatedAt: now,
     }, { merge: true });
-    newlyReserved = true;
+    return true;
   });
-
-  return newlyReserved;
 }
 
-async function releaseCustomPetCreditReservation(uid, petId, { deletePet = false } = {}) {
+function isExpiredCustomPetGenerationReservation(pet) {
+  const isGenerating = pet.status === 'generating' ||
+    (!pet.status && !pet.normalImageUrl && !pet.sleepingImageUrl && !pet.failedImageUrl);
+  if (pet.purchaseStatus !== 'reserved' || !isGenerating) return false;
+
+  const reservedAtMs = pet.purchaseReservedAt?.toMillis?.();
+  const expiresAtMs = Number.isFinite(pet.purchaseReservationExpiresAtMs)
+    ? pet.purchaseReservationExpiresAtMs
+    : (Number.isFinite(reservedAtMs) ? reservedAtMs + CUSTOM_PET_GENERATION_LEASE_MS : NaN);
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
+}
+
+async function releaseCustomPetCreditReservation(uid, petId, {
+  deletePet = false,
+  reservationId,
+  expiredOnly = false,
+} = {}) {
   const petRef = db.doc(`users/${uid}/pets/${petId}`);
   const creditRef = db.doc(`users/${uid}/petPurchaseCredits/${CUSTOM_PET_CREDIT_DOC_ID}`);
 
@@ -382,6 +423,12 @@ async function releaseCustomPetCreditReservation(uid, petId, { deletePet = false
     const petSnapshot = await transaction.get(petRef);
     const pet = petSnapshot.data() || {};
     if (!petSnapshot.exists || pet.purchaseStatus !== 'reserved') {
+      return;
+    }
+    if ((reservationId || expiredOnly) && pet.purchaseReservationId !== reservationId) {
+      return;
+    }
+    if (expiredOnly && !isExpiredCustomPetGenerationReservation(pet)) {
       return;
     }
 
@@ -402,6 +449,18 @@ async function releaseCustomPetCreditReservation(uid, petId, { deletePet = false
   });
 }
 
+async function releaseExpiredCustomPetCreditReservations(uid) {
+  const snapshot = await db.collection(`users/${uid}/pets`)
+    .where('purchaseStatus', '==', 'reserved').get();
+  await Promise.all(snapshot.docs
+    .filter((pet) => isExpiredCustomPetGenerationReservation(pet.data() || {}))
+    .map((pet) => releaseCustomPetCreditReservation(uid, pet.id, {
+      deletePet: true,
+      reservationId: pet.data()?.purchaseReservationId,
+      expiredOnly: true,
+    })));
+}
+
 function receiptItems(receipt) {
   return [
     ...(Array.isArray(receipt?.receipt?.in_app) ? receipt.receipt.in_app : []),
@@ -417,10 +476,18 @@ async function postAppleReceipt(url, payload) {
   let lastError = null;
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      return await axios.post(url, payload, {
-        timeout: 20000,
+      const response = await axios.post(url, payload, {
+        // Leave room for retries and the sandbox fallback within the callable's 60s budget.
+        timeout: 8000,
         validateStatus: () => true,
       });
+      const status = response.data?.status;
+      if (response.status < 200 || response.status >= 300 ||
+          [21002, 21005, 21009].includes(status) ||
+          (status >= 21100 && status <= 21199)) {
+        throw new Error(`Apple receipt service is temporarily unavailable (${response.status}/${status}).`);
+      }
+      return response;
     } catch (error) {
       lastError = error;
       logger.warn('Apple receipt verification request failed', {
@@ -469,15 +536,22 @@ async function verifyAppleReceipt({ verificationData, transactionId, productId }
     throw new HttpsError('failed-precondition', 'Receipt bundle id does not match this app.');
   }
 
-  const item = receiptItems(data).find((entry) => (
+  const items = receiptItems(data).filter((entry) => (
     entry?.product_id === productId &&
-    (entry?.transaction_id === transactionId || entry?.original_transaction_id === transactionId)
+    entry?.transaction_id === transactionId
   ));
 
-  if (!item) {
+  if (items.length === 0) {
     throw new HttpsError('failed-precondition', 'Receipt does not contain the expected purchase transaction.');
   }
 
+  if (items.some((entry) => (
+    entry.cancellation_date_ms || entry.cancellation_date || entry.cancellation_reason !== undefined
+  ))) {
+    throw new HttpsError('failed-precondition', 'This purchase has been refunded or revoked.');
+  }
+
+  const item = items[0];
   return {
     environment,
     transactionId: item.transaction_id || transactionId,
@@ -593,7 +667,7 @@ async function generateAndUploadAvatarState({
   });
   const { bytes, contentType } = await callGeminiImage({ apiKey, imageBase64, imageMimeType, prompt });
   const generatedMs = Date.now() - startedAt;
-  const path = `users/${uid}/pets/${petId}/${state}.${imageExtension(contentType)}`;
+  const path = `users/${uid}/pets/${petId}/${state}-${randomUUID()}.${imageExtension(contentType)}`;
   const url = await uploadPublicImage(path, bytes, contentType);
   logger.info('Pet avatar state generation finished', {
     uid,
@@ -654,7 +728,8 @@ Only return JSON, no markdown.`;
         ],
         generationConfig: {
           temperature: 0,
-          maxOutputTokens: 500,
+          maxOutputTokens: 1024,
+          thinkingConfig: { thinkingBudget: 0 },
         },
       });
 
@@ -673,9 +748,12 @@ Only return JSON, no markdown.`;
         visualTraits,
       };
     } catch (error) {
-      logger.error('Gemini image analysis failed', error);
+      logger.error('Gemini image analysis failed', {
+        errorCode: error instanceof HttpsError ? error.code : 'internal',
+        httpStatus: Number.isInteger(error.response?.status) ? error.response.status : null,
+      });
       if (error instanceof HttpsError) throw error;
-      throw new HttpsError('internal', error.message || 'Image analysis failed.');
+      throw new HttpsError('internal', 'Image analysis failed. Please try again.');
     }
   },
 );
@@ -696,6 +774,7 @@ exports.generatePetAvatar = onCall(
     const originalImagePath = optionalString(request.data?.originalImagePath, 240);
     const apiKey = geminiApiKey.value();
     const prompts = avatarPrompts({ species, breed, breedTraits, visualTraits, featureNote });
+    const reservationId = randomUUID();
     let reservedCredit = false;
 
     try {
@@ -713,7 +792,22 @@ exports.generatePetAvatar = onCall(
         visualTraitCount: visualTraits.length,
       });
 
-      reservedCredit = await reserveCustomPetCredit(uid, petId);
+      reservedCredit = await reserveCustomPetCredit(uid, petId, reservationId);
+      if (!reservedCredit) {
+        const pet = (await db.doc(`users/${uid}/pets/${petId}`).get()).data() || {};
+        if (pet.purchaseStatus === 'reserved' && pet.status === 'generated' &&
+            pet.normalImageUrl && pet.sleepingImageUrl && pet.failedImageUrl) {
+          return {
+            originalImagePath: pet.originalImagePath || null,
+            normalImageUrl: pet.normalImageUrl,
+            sleepingImageUrl: pet.sleepingImageUrl,
+            failedImageUrl: pet.failedImageUrl,
+            avatarStatesVersion: pet.avatarStatesVersion,
+            stateImagesStatus: pet.stateImagesStatus,
+          };
+        }
+        throw new HttpsError('aborted', 'This pet is already being generated. Please retry shortly.');
+      }
 
       const originalUploadPromise = originalImagePath
         ? Promise.resolve(originalImagePath)
@@ -765,24 +859,32 @@ exports.generatePetAvatar = onCall(
         updatedAt: now,
       }, { merge: true });
 
-      await db.doc(`users/${uid}/pets/${petId}`).set({
-        species,
-        breed,
-        breedTraits,
-        visualTraits,
-        featureNote,
-        originalImagePath: storedOriginalImagePath,
-        normalImageUrl,
-        sleepingImageUrl,
-        failedImageUrl,
-        avatarStatesVersion: AVATAR_STATES_VERSION,
-        status: 'generated',
-        purchaseStatus: 'reserved',
-        stateImagesStatus: 'ready',
-        isLocalAsset: false,
-        createdAt: now,
-        updatedAt: now,
-      }, { merge: true });
+      const petRef = db.doc(`users/${uid}/pets/${petId}`);
+      await db.runTransaction(async (transaction) => {
+        const petSnapshot = await transaction.get(petRef);
+        const pet = petSnapshot.data() || {};
+        if (!petSnapshot.exists || pet.purchaseStatus !== 'reserved' ||
+            pet.purchaseReservationId !== reservationId) {
+          throw new HttpsError('failed-precondition', 'This pet creation reservation is no longer active.');
+        }
+        transaction.set(petRef, {
+          species,
+          breed,
+          breedTraits,
+          visualTraits,
+          featureNote,
+          originalImagePath: storedOriginalImagePath,
+          normalImageUrl,
+          sleepingImageUrl,
+          failedImageUrl,
+          avatarStatesVersion: AVATAR_STATES_VERSION,
+          status: 'generated',
+          stateImagesStatus: 'ready',
+          isLocalAsset: false,
+          createdAt: now,
+          updatedAt: now,
+        }, { merge: true });
+      });
 
       return {
         originalImagePath: storedOriginalImagePath,
@@ -794,7 +896,7 @@ exports.generatePetAvatar = onCall(
       };
     } catch (error) {
       if (reservedCredit) {
-        await releaseCustomPetCreditReservation(uid, petId, { deletePet: true });
+        await releaseCustomPetCreditReservation(uid, petId, { deletePet: true, reservationId });
       }
       logger.error('Pet avatar normal generation failed', {
         uid,
@@ -1025,6 +1127,7 @@ exports.getCustomPetPurchaseCredit = onCall(
   { timeoutSeconds: 20, memory: '256MiB' },
   async (request) => {
     const uid = requireAuth(request);
+    await releaseExpiredCustomPetCreditReservations(uid);
     return {
       unusedCredits: await unusedCustomPetCredits(uid),
       productId: CUSTOM_PET_PRODUCT_ID,
@@ -1055,23 +1158,46 @@ exports.verifyCustomPetPurchase = onCall(
     });
 
     const transactionRef = db.doc(`users/${uid}/iapTransactions/${verified.transactionId}`);
+    const globalTransactionRef = db.doc(`appStoreTransactions/${verified.environment}_${verified.transactionId}`);
     const creditRef = db.doc(`users/${uid}/petPurchaseCredits/${CUSTOM_PET_CREDIT_DOC_ID}`);
     let unusedCredits = 0;
 
     await db.runTransaction(async (transaction) => {
-      const [transactionSnapshot, creditSnapshot] = await Promise.all([
+      const [transactionSnapshot, globalTransactionSnapshot, creditSnapshot] = await Promise.all([
         transaction.get(transactionRef),
+        transaction.get(globalTransactionRef),
         transaction.get(creditRef),
       ]);
 
+      if (globalTransactionSnapshot.exists && globalTransactionSnapshot.data()?.uid !== uid) {
+        throw new HttpsError('permission-denied', 'This purchase has already been credited to another account.');
+      }
+
       const currentUnused = Number(creditSnapshot.data()?.unusedCount || 0);
-      if (transactionSnapshot.exists) {
+      if (transactionSnapshot.exists || globalTransactionSnapshot.exists) {
+        if (!globalTransactionSnapshot.exists) {
+          const originalCreatedAt = transactionSnapshot.data()?.createdAt;
+          transaction.set(globalTransactionRef, {
+            uid,
+            productId,
+            transactionId: verified.transactionId,
+            environment: verified.environment,
+            ...(originalCreatedAt ? { createdAt: originalCreatedAt } : {}),
+          });
+        }
         unusedCredits = currentUnused;
         return;
       }
 
       unusedCredits = currentUnused + 1;
       const now = admin.firestore.FieldValue.serverTimestamp();
+      transaction.set(globalTransactionRef, {
+        uid,
+        productId,
+        transactionId: verified.transactionId,
+        environment: verified.environment,
+        createdAt: now,
+      });
       transaction.set(transactionRef, {
         productId,
         transactionId: verified.transactionId,
@@ -1128,6 +1254,9 @@ exports.saveGeneratedPetName = onCall(
 
       if (pet.purchaseStatus !== 'reserved') {
         throw new HttpsError('failed-precondition', 'Please purchase a custom pet creation credit before saving.');
+      }
+      if (pet.status !== 'generated' || !pet.normalImageUrl || !pet.sleepingImageUrl || !pet.failedImageUrl) {
+        throw new HttpsError('failed-precondition', 'Please wait until pet image generation has finished before saving.');
       }
 
       const now = admin.firestore.FieldValue.serverTimestamp();

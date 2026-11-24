@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:cloud_functions/cloud_functions.dart';
@@ -36,6 +35,14 @@ class _BillingVerificationException implements Exception {
   String toString() => message;
 }
 
+typedef BillingFunctionCaller = Future<dynamic> Function(
+  String name, {
+  required Map<String, dynamic> data,
+  required Duration timeout,
+});
+
+typedef BillingSignIn = Future<bool> Function({required int attempts});
+
 class BillingService extends ChangeNotifier {
   static const String customPetProductId = 'luffy.custom_pet.create.v1';
   static const bool _bypassIap =
@@ -48,13 +55,24 @@ class BillingService extends ChangeNotifier {
   ];
   static const Duration _purchaseFlowRecoveryTimeout = Duration(seconds: 12);
 
-  final InAppPurchase _iap;
+  final InAppPurchase? _iapOverride;
+  InAppPurchase get _iap => _iapOverride ?? InAppPurchase.instance;
+  final bool _storeKitReady;
+  final BillingFunctionCaller _functionCaller;
+  final BillingSignIn _ensureSignedIn;
   StreamSubscription<List<PurchaseDetails>>? _purchaseSubscription;
   ProductDetails? _customPetProduct;
-  PurchaseDetails? _pendingVerificationPurchase;
+  final Map<String, PurchaseDetails> _pendingPurchases = {};
+  final Map<String, Future<void>> _verificationFutures = {};
+  final Set<String> _verifiedTransactions = {};
+  Future<void> _verificationQueue = Future<void>.value();
+  int _balanceRevision = 0;
+  bool _storePaymentPending = false;
   Timer? _purchaseFlowRecoveryTimer;
   Future<void>? _initializationFuture;
   Future<void>? _creditRefreshFuture;
+  Future<void>? _purchaseStartFuture;
+  bool _disposed = false;
 
   /// 用於 [waitForCreditConfirmation] 等待後端 credit 確認結果
   /// 在 [_verifyAndDeliver] 完成後由 [_completeCreditConfirmation] 觸發
@@ -72,101 +90,57 @@ class BillingService extends ChangeNotifier {
   bool _isInitialized = false;
 
   static const String _localCreditsKey = 'luffy_local_unused_credits';
-  static const String _localUnverifiedCreditsKey = 'luffy_local_unverified_credits';
-  int _unverifiedCredits = 0;
-
-  Future<void> _saveCreditsToLocal(int credits) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_localCreditsKey, credits);
-    } catch (e) {
-      debugPrint('[Billing] Failed to save credits locally: $e');
-    }
-  }
-
-  Future<int> _loadCreditsFromLocal() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getInt(_localCreditsKey) ?? 0;
-    } catch (e) {
-      debugPrint('[Billing] Failed to load credits locally: $e');
-      return 0;
-    }
-  }
-
-  Future<int> _loadUnverifiedCreditsFromLocal() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getInt(_localUnverifiedCreditsKey) ?? 0;
-    } catch (e) {
-      debugPrint('[Billing] Failed to load unverified credits locally: $e');
-      return 0;
-    }
-  }
-
-  Future<void> _saveUnverifiedCreditsToLocal(int credits) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_localUnverifiedCreditsKey, credits);
-    } catch (e) {
-      debugPrint('[Billing] Failed to save unverified credits locally: $e');
-    }
-  }
+  static const String _localUnverifiedCreditsKey =
+      'luffy_local_unverified_credits';
 
   void _updateUnusedCredits(int value) {
     if (_unusedCredits != value) {
       _unusedCredits = value;
-      notifyListeners();
-      unawaited(_saveCreditsToLocal(value));
+      if (!_disposed) notifyListeners();
     }
   }
 
-  void _updateCreditsWithRemote(int remoteValue) {
-    final total = remoteValue + _unverifiedCredits;
-    if (_unusedCredits != total) {
-      _unusedCredits = total;
-      notifyListeners();
-      unawaited(_saveCreditsToLocal(total));
+  BillingService({
+    InAppPurchase? inAppPurchase,
+    BillingFunctionCaller? callFunction,
+    BillingSignIn? ensureSignedIn,
+    bool storeKitReady = true,
+  })  : _iapOverride = inAppPurchase,
+        _storeKitReady = storeKitReady,
+        _functionCaller = callFunction ?? FirebaseService.callFunction,
+        _ensureSignedIn = ensureSignedIn ??
+            (({required int attempts}) =>
+                FirebaseService.ensureSignedIn(attempts: attempts)) {
+    if (_storeKitReady) {
+      _purchaseSubscription = _iap.purchaseStream.listen(
+        _handlePurchaseUpdates,
+        onError: (Object error) {
+          _setError('內購連線失敗，請稍後再試。');
+          _completeCreditConfirmation(false);
+        },
+      );
     }
-  }
-
-  /// 消耗本地降級未驗證的額度（例如在本地 Mock 寵物完成命名儲存時呼叫）
-  Future<void> consumeLocalFallbackCredit() async {
-    if (_unverifiedCredits > 0) {
-      _unverifiedCredits -= 1;
-      await _saveUnverifiedCreditsToLocal(_unverifiedCredits);
-    }
-    if (_unusedCredits > 0) {
-      _unusedCredits -= 1;
-      notifyListeners();
-      unawaited(_saveCreditsToLocal(_unusedCredits));
-    }
-    debugPrint('[Billing] consumeLocalFallbackCredit: unusedCredits=$_unusedCredits, unverifiedCredits=$_unverifiedCredits');
-  }
-
-  BillingService({InAppPurchase? inAppPurchase})
-      : _iap = inAppPurchase ?? InAppPurchase.instance {
-    _purchaseSubscription = _iap.purchaseStream.listen(
-      _handlePurchaseUpdates,
-      onError: (Object error) {
-        _setError('內購連線失敗，請稍後再試。');
-        _completeCreditConfirmation(false);
-      },
-    );
     unawaited(_initLocalCreditsAndRefresh());
   }
 
   Future<void> _initLocalCreditsAndRefresh() async {
-    final cached = await _loadCreditsFromLocal();
-    _unverifiedCredits = await _loadUnverifiedCreditsFromLocal();
-    _unusedCredits = cached;
-    notifyListeners();
+    // These legacy values could include credits whose Apple receipt was never
+    // verified. Only the current Firebase user's server balance can unlock AI.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_localCreditsKey);
+      await prefs.remove(_localUnverifiedCreditsKey);
+    } catch (error) {
+      debugPrint('[Billing] legacy credit cache cleanup failed: $error');
+    }
+    if (_disposed) return;
     await refreshCustomPetCredit();
   }
 
   CustomPetPurchaseState get state => _state;
   String? get errorMessage => _errorMessage;
   int get unusedCredits => _unusedCredits;
+  bool get isPaymentPending => _storePaymentPending;
 
   /// 是否有可用的新增寵物名額（含開發繞過模式）
   bool get hasUnusedCredit => _bypassIap || _unusedCredits > 0;
@@ -209,42 +183,74 @@ class BillingService extends ChangeNotifier {
   /// UI 收到 [CustomPetPurchaseOutcome.purchased] 後，應呼叫 [waitForCreditConfirmation]
   /// 等待後端收據驗證完成，再進入上傳圖片流程。
   Future<void> purchaseCustomPetUnlock() async {
+    if (_purchaseStartFuture != null) return _purchaseStartFuture!;
+    final future = _purchaseCustomPetUnlock();
+    _purchaseStartFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_purchaseStartFuture, future)) _purchaseStartFuture = null;
+    }
+  }
+
+  Future<void> _purchaseCustomPetUnlock() async {
+    if (_pendingPurchases.isNotEmpty) {
+      _emitPurchaseOutcome(CustomPetPurchaseOutcome.purchased);
+      await refreshCustomPetCredit();
+      return;
+    }
+    if (_storePaymentPending ||
+        _state == CustomPetPurchaseState.purchasing ||
+        _state == CustomPetPurchaseState.pending) {
+      return;
+    }
     // 開發繞過模式：直接給一個 credit 並通知購買成功
     if (_bypassIap) {
       _updateUnusedCredits(1);
-      _purchaseOutcomeController.add(CustomPetPurchaseOutcome.purchased);
+      _emitPurchaseOutcome(CustomPetPurchaseOutcome.purchased);
       return;
     }
 
     // 已有名額，不需再購買，直接通知可進入上傳流程
     if (_unusedCredits > 0) {
-      _purchaseOutcomeController.add(CustomPetPurchaseOutcome.purchased);
+      _emitPurchaseOutcome(CustomPetPurchaseOutcome.purchased);
       return;
     }
 
     // 清理殘留的失敗或暫停狀態
-    if (_state == CustomPetPurchaseState.pending) {
-      _setState(CustomPetPurchaseState.idle);
-      await _finishStaleStoreKitFailedTransactions();
-    } else if (_state == CustomPetPurchaseState.error) {
+    if (_state == CustomPetPurchaseState.error) {
       _setState(CustomPetPurchaseState.idle);
     }
 
     // 確保 StoreKit 初始化完成並取得商品資訊
-    debugPrint('[Billing] before initialize, _customPetProduct=${_customPetProduct?.id}, state=$_state, error=$_errorMessage');
+    debugPrint(
+        '[Billing] before initialize, _customPetProduct=${_customPetProduct?.id}, state=$_state, error=$_errorMessage');
     await initialize(forceProductRefresh: _customPetProduct == null);
-    debugPrint('[Billing] after initialize, _customPetProduct=${_customPetProduct?.id}, _isAvailable=$_isAvailable, state=$_state');
+    debugPrint(
+        '[Billing] after initialize, _customPetProduct=${_customPetProduct?.id}, _isAvailable=$_isAvailable, state=$_state');
 
     // 初始化後再次確認是否已有名額（刷新 credit 可能帶入新資料）
     if (_unusedCredits > 0) {
-      _purchaseOutcomeController.add(CustomPetPurchaseOutcome.purchased);
+      _emitPurchaseOutcome(CustomPetPurchaseOutcome.purchased);
       return;
     }
 
     if (_customPetProduct == null) {
-      debugPrint('[Billing] FAILED: _customPetProduct is null after initialize, errorMessage=$_errorMessage');
+      debugPrint(
+          '[Billing] FAILED: _customPetProduct is null after initialize, errorMessage=$_errorMessage');
       _setError('連接 App Store 逾時，請稍後再試。');
-      _purchaseOutcomeController.add(CustomPetPurchaseOutcome.failed);
+      _emitPurchaseOutcome(CustomPetPurchaseOutcome.failed);
+      return;
+    }
+
+    // Confirm delivery is reachable before opening a new paid transaction.
+    await refreshCustomPetCredit();
+    if (_errorMessage != null) {
+      _emitPurchaseOutcome(CustomPetPurchaseOutcome.failed);
+      return;
+    }
+    if (hasUnusedCredit) {
+      _emitPurchaseOutcome(CustomPetPurchaseOutcome.purchased);
       return;
     }
 
@@ -253,29 +259,32 @@ class BillingService extends ChangeNotifier {
       await _finishStaleStoreKitFailedTransactions();
       _setState(CustomPetPurchaseState.purchasing);
       _schedulePurchaseFlowRecovery();
-      debugPrint('[Billing] starting consumable purchase for ${_customPetProduct!.id}');
+      debugPrint(
+          '[Billing] starting consumable purchase for ${_customPetProduct!.id}');
       await _startConsumablePurchase();
       debugPrint('[Billing] _startConsumablePurchase returned successfully');
     } catch (error) {
       debugPrint('[Billing] purchase start error: $error');
       if (error.toString().contains('storekit_duplicate_product_object') &&
-          _pendingVerificationPurchase != null) {
+          _pendingPurchases.isNotEmpty) {
         debugPrint(
             '[Billing] Duplicate transaction found in memory. Retrying verification.');
         _setState(CustomPetPurchaseState.pending);
-        _purchaseOutcomeController.add(CustomPetPurchaseOutcome.purchased);
-        unawaited(_verifyAndDeliver(_pendingVerificationPurchase!));
+        _emitPurchaseOutcome(CustomPetPurchaseOutcome.purchased);
+        unawaited(refreshCustomPetCredit());
         return;
       }
       final recovered = await _recoverAndRestartPurchaseAfterStartError(error);
       if (!recovered) {
+        _storePaymentPending = false;
         if (_isRecoverableStoreKitStartError(error)) {
           _setState(CustomPetPurchaseState.idle);
         } else {
           _setError('付款流程啟動失敗，請稍後再試。');
-          debugPrint('[Billing] purchase start failed (non-recoverable): $error');
+          debugPrint(
+              '[Billing] purchase start failed (non-recoverable): $error');
         }
-        _purchaseOutcomeController.add(CustomPetPurchaseOutcome.failed);
+        _emitPurchaseOutcome(CustomPetPurchaseOutcome.failed);
       }
     }
   }
@@ -289,18 +298,41 @@ class BillingService extends ChangeNotifier {
   }) async {
     // 已有名額或狀態已確認，直接回傳
     if (_unusedCredits > 0) return true;
-    if (_state == CustomPetPurchaseState.purchased) return true;
     if (_state == CustomPetPurchaseState.error) return false;
 
     // 建立或複用 Completer 等待 _verifyAndDeliver 完成
     _creditConfirmationCompleter ??= Completer<bool>();
+    return _creditConfirmationCompleter!.future.timeout(
+      timeout,
+      onTimeout: () => false,
+    );
+  }
+
+  /// 恢復歷史購買（StoreKit 恢復流程）
+  Future<void> restorePurchases() async {
+    if (!_storeKitReady) {
+      const message = '內購初始化未完成，請重新啟動 App 後再試。';
+      _setError(message);
+      throw const _BillingVerificationException(message);
+    }
+    _setState(CustomPetPurchaseState.loading);
     try {
-      return await _creditConfirmationCompleter!.future.timeout(
-        timeout,
-        onTimeout: () => false,
-      );
-    } finally {
-      _creditConfirmationCompleter = null;
+      await _iap.restorePurchases();
+      // StoreKit publishes restored transactions on its stream. Let that event
+      // arrive, then await verification and refresh the server-owned balance.
+      await Future<void>.delayed(Duration.zero);
+      await refreshCustomPetCredit();
+      if (_errorMessage != null) {
+        throw _BillingVerificationException(_errorMessage!);
+      }
+      if (_state == CustomPetPurchaseState.loading) {
+        _setState(hasUnusedCredit
+            ? CustomPetPurchaseState.purchased
+            : CustomPetPurchaseState.idle);
+      }
+    } catch (error) {
+      _setError('恢復購買失敗：$error');
+      rethrow;
     }
   }
 
@@ -309,9 +341,7 @@ class BillingService extends ChangeNotifier {
   }) async {
     if (_creditRefreshFuture != null) return _creditRefreshFuture!;
 
-    final future = _pendingVerificationPurchase != null
-        ? _verifyAndDeliver(_pendingVerificationPurchase!)
-        : _refreshCustomPetCredit(timeout: timeout);
+    final future = _refreshCreditAndPendingPurchases(timeout);
     _creditRefreshFuture = future;
     try {
       await future;
@@ -322,11 +352,24 @@ class BillingService extends ChangeNotifier {
     }
   }
 
+  Future<void> _refreshCreditAndPendingPurchases(Duration timeout) async {
+    final pending = _pendingPurchases.values.toList();
+    if (pending.isNotEmpty) {
+      await Future.wait(pending.map(_verifyAndDeliver));
+    } else {
+      await _refreshCustomPetCredit(timeout: timeout);
+    }
+  }
+
   // ──────────────────────────────────────────────────────────────────────────
   // 私有方法
   // ──────────────────────────────────────────────────────────────────────────
 
   Future<void> _initializeStoreKit({required bool forceProductRefresh}) async {
+    if (!_storeKitReady) {
+      _setError('內購初始化未完成，請重新啟動 App 後再試。');
+      return;
+    }
     try {
       unawaited(refreshCustomPetCredit());
 
@@ -391,20 +434,23 @@ class BillingService extends ChangeNotifier {
       _updateUnusedCredits(1);
       return;
     }
-    if (!await FirebaseService.ensureSignedIn(attempts: 2)) return;
-
+    final balanceRevision = _balanceRevision;
     try {
+      if (!await _ensureSignedIn(attempts: 2)) {
+        throw const _BillingVerificationException('無法確認已購名額，請連線後重試。');
+      }
       final data = await _callFunction(
         'getCustomPetPurchaseCredit',
         timeout: timeout,
       );
-      if (data is Map) {
-        final value = data['unusedCredits'];
-        final remoteCredits = value is num ? value.toInt() : 0;
-        _updateCreditsWithRemote(remoteCredits);
-        _errorMessage = null;
+      if (balanceRevision != _balanceRevision) return;
+      _updateUnusedCredits(_remoteCredits(data));
+      _errorMessage = null;
+      if (_state == CustomPetPurchaseState.purchased && !hasUnusedCredit) {
+        _setState(CustomPetPurchaseState.idle);
       }
     } catch (error) {
+      if (balanceRevision != _balanceRevision) return;
       _setError(_readablePurchaseError(error));
       if (kDebugMode) {
         debugPrint('[Billing] refresh credit failed: $error');
@@ -418,40 +464,56 @@ class BillingService extends ChangeNotifier {
     for (final purchase in purchaseDetailsList) {
       if (purchase.productID != customPetProductId) continue;
 
-      debugPrint('[Billing] _handlePurchaseUpdates: productID=${purchase.productID}, status=${purchase.status}, error=${purchase.error?.code}:${purchase.error?.message}');
+      debugPrint(
+          '[Billing] _handlePurchaseUpdates: productID=${purchase.productID}, status=${purchase.status}, error=${purchase.error?.code}:${purchase.error?.message}');
       switch (purchase.status) {
         case PurchaseStatus.pending:
           // 等待用戶在彈窗中操作，保持 purchasing 狀態並重置計時器
+          _storePaymentPending = true;
           _setState(CustomPetPurchaseState.pending);
           _schedulePurchaseFlowRecovery();
           break;
 
         case PurchaseStatus.error:
           // Apple 回傳錯誤，立即通知 UI
+          _storePaymentPending = false;
           _cancelPurchaseFlowRecovery();
           await _completePurchaseIfNeeded(purchase);
           _setError(purchase.error?.message ?? '付款失敗，請稍後再試。');
           _completeCreditConfirmation(false);
-          _purchaseOutcomeController.add(CustomPetPurchaseOutcome.failed);
+          _emitPurchaseOutcome(CustomPetPurchaseOutcome.failed);
           break;
 
         case PurchaseStatus.canceled:
           // 用戶主動取消，立即通知 UI（不顯示任何錯誤）
+          _storePaymentPending = false;
           debugPrint('[Billing] user canceled purchase');
           _cancelPurchaseFlowRecovery();
           await _completePurchaseIfNeeded(purchase);
           _setState(CustomPetPurchaseState.idle);
-          _purchaseOutcomeController.add(CustomPetPurchaseOutcome.canceled);
+          _completeCreditConfirmation(false);
+          _emitPurchaseOutcome(CustomPetPurchaseOutcome.canceled);
           break;
 
         case PurchaseStatus.purchased:
         case PurchaseStatus.restored:
           // Apple 已確認付款，立即通知 UI（不等待後端驗證）
-          debugPrint('[Billing] purchase confirmed by Apple, starting verification');
+          _storePaymentPending = false;
+          debugPrint(
+              '[Billing] purchase confirmed by Apple, starting verification');
           _cancelPurchaseFlowRecovery();
-          _pendingVerificationPurchase = purchase;
-          _setState(CustomPetPurchaseState.loading);
-          _purchaseOutcomeController.add(CustomPetPurchaseOutcome.purchased);
+          final key = _transactionKey(purchase);
+          if (purchase.purchaseID == null || purchase.purchaseID!.isEmpty) {
+            _setError('付款交易編號尚未取得，請稍後重新確認付款結果。');
+            _completeCreditConfirmation(false);
+            break;
+          }
+          final alreadyProcessing = _pendingPurchases.containsKey(key) ||
+              _verifiedTransactions.contains(key);
+          _pendingPurchases[key] = purchase;
+          if (!alreadyProcessing) {
+            _emitPurchaseOutcome(CustomPetPurchaseOutcome.purchased);
+          }
           // 異步執行後端收據驗證，結果透過 _creditConfirmationCompleter 回傳
           unawaited(_verifyAndDeliver(purchase));
           break;
@@ -459,14 +521,62 @@ class BillingService extends ChangeNotifier {
     }
   }
 
-  Future<void> _verifyAndDeliver(PurchaseDetails purchase) async {
-    _pendingVerificationPurchase = purchase;
+  String _transactionKey(PurchaseDetails purchase) =>
+      '${purchase.productID}:${purchase.purchaseID}';
+
+  int _remoteCredits(dynamic data) {
+    if (data is! Map || data['productId'] != customPetProductId) {
+      throw const _BillingVerificationException('名額確認回應不完整，請重新驗證。');
+    }
+    final value = data['unusedCredits'];
+    if (value is! num ||
+        !value.isFinite ||
+        value < 0 ||
+        value.toInt() != value) {
+      throw const _BillingVerificationException('名額確認回應不完整，請重新驗證。');
+    }
+    return value.toInt();
+  }
+
+  Future<void> _verifyAndDeliver(PurchaseDetails purchase) {
+    final key = _transactionKey(purchase);
+    final inFlight = _verificationFutures[key];
+    if (inFlight != null) return inFlight;
+    _pendingPurchases[key] = purchase;
+    late final Future<void> future;
+    future = _verificationQueue
+        .then((_) => _verifyReceiptAndDeliver(purchase, key))
+        .whenComplete(() {
+      if (identical(_verificationFutures[key], future)) {
+        _verificationFutures.remove(key);
+      }
+    });
+    _verificationQueue = future;
+    _verificationFutures[key] = future;
+    return future;
+  }
+
+  Future<void> _verifyReceiptAndDeliver(
+      PurchaseDetails purchase, String key) async {
     try {
-      final signedIn = await FirebaseService.ensureSignedIn();
+      _setState(CustomPetPurchaseState.loading);
+      final signedIn = await _ensureSignedIn(attempts: 3);
       if (!signedIn) {
         throw const _BillingVerificationException(
           '付款已完成，但目前無法登入驗證服務。請確認網路後重試，不會重複扣款。',
         );
+      }
+
+      if (_verifiedTransactions.contains(key)) {
+        if (await _completePurchaseIfNeeded(purchase)) {
+          _pendingPurchases.remove(key);
+        }
+        await _refreshCustomPetCredit(timeout: const Duration(seconds: 12));
+        _setState(hasUnusedCredit
+            ? CustomPetPurchaseState.purchased
+            : CustomPetPurchaseState.idle);
+        _completeCreditConfirmation(hasUnusedCredit);
+        return;
       }
 
       final data = await _callFunction(
@@ -483,59 +593,26 @@ class BillingService extends ChangeNotifier {
         timeout: const Duration(seconds: 90),
       );
 
-      if (data is Map) {
-        final value = data['unusedCredits'];
-        final remoteCredits = value is num ? value.toInt() : 0;
-        _updateCreditsWithRemote(remoteCredits);
-      } else {
-        unawaited(refreshCustomPetCredit());
+      if (data is! Map ||
+          data['ok'] != true ||
+          data['transactionId'] != purchase.purchaseID) {
+        throw const _BillingVerificationException('付款尚未驗證成功，請重新確認付款結果。');
       }
-
-      if (purchase.pendingCompletePurchase) {
-        await _completePurchaseIfNeeded(purchase);
+      final verifiedCredits = _remoteCredits(data);
+      _balanceRevision += 1;
+      _updateUnusedCredits(verifiedCredits);
+      _verifiedTransactions.add(key);
+      if (await _completePurchaseIfNeeded(purchase)) {
+        _pendingPurchases.remove(key);
       }
-
-      _pendingVerificationPurchase = null;
-      _setState(CustomPetPurchaseState.purchased);
-      _completeCreditConfirmation(true);
+      _setState(hasUnusedCredit
+          ? CustomPetPurchaseState.purchased
+          : CustomPetPurchaseState.idle);
+      _completeCreditConfirmation(hasUnusedCredit);
     } catch (error) {
-      final message = _readablePurchaseError(error);
-
-      // Check if it's a network, TLS, handshake or timeout error (case-insensitive)
-      final normalized = error.toString().toLowerCase();
-      final isNetworkError = error is TimeoutException ||
-          error is SocketException ||
-          normalized.contains('network error') ||
-          normalized.contains('timeout') ||
-          normalized.contains('tls') ||
-          normalized.contains('secure connection') ||
-          normalized.contains('handshake') ||
-          normalized.contains('connection terminated during handshake') ||
-          normalized.contains('unreachable') ||
-          normalized.contains('unavailable') ||
-          normalized.contains('host') ||
-          (error is FirebaseFunctionsException && (
-              error.code == 'unavailable' ||
-              error.code == 'deadline-exceeded' ||
-              error.message?.toLowerCase().contains('network error') == true
-          ));
-
-      if (isNetworkError) {
-        debugPrint('[Billing] 檢測到網路或連線驗證失敗，執行本地降級授權以跳過驗證頁面。');
-        _unverifiedCredits += 1;
-        unawaited(_saveUnverifiedCreditsToLocal(_unverifiedCredits));
-        _updateUnusedCredits(_unusedCredits + 1);
-
-        if (purchase.pendingCompletePurchase) {
-          await _completePurchaseIfNeeded(purchase);
-        }
-        _pendingVerificationPurchase = null;
-        _setState(CustomPetPurchaseState.purchased);
-        _completeCreditConfirmation(true);
-        return;
-      }
-
-      _setError(message);
+      // Leave the paid transaction unfinished so StoreKit redelivers it after
+      // restart. Retrying verifies the same transaction; it never buys again.
+      _setError(_readablePurchaseError(error));
       _completeCreditConfirmation(false);
       if (kDebugMode) {
         debugPrint('[Billing] verify failed: $error');
@@ -544,6 +621,7 @@ class BillingService extends ChangeNotifier {
   }
 
   Future<void> _startConsumablePurchase() async {
+    _storePaymentPending = true;
     final purchaseParam = PurchaseParam(productDetails: _customPetProduct!);
     final started = await _iap.buyConsumable(
       purchaseParam: purchaseParam,
@@ -614,14 +692,16 @@ class BillingService extends ChangeNotifier {
     }
   }
 
-  Future<void> _completePurchaseIfNeeded(PurchaseDetails purchase) async {
-    if (!purchase.pendingCompletePurchase) return;
+  Future<bool> _completePurchaseIfNeeded(PurchaseDetails purchase) async {
+    if (!purchase.pendingCompletePurchase) return true;
     try {
       await _iap.completePurchase(purchase);
+      return true;
     } catch (error) {
       if (kDebugMode) {
         debugPrint('[Billing] complete purchase failed: $error');
       }
+      return false;
     }
   }
 
@@ -631,7 +711,7 @@ class BillingService extends ChangeNotifier {
     _purchaseFlowRecoveryTimer?.cancel();
     _purchaseFlowRecoveryTimer = Timer(_purchaseFlowRecoveryTimeout, () async {
       _purchaseFlowRecoveryTimer = null;
-      if (_pendingVerificationPurchase != null) return;
+      if (_pendingPurchases.isNotEmpty) return;
       if (_state != CustomPetPurchaseState.purchasing &&
           _state != CustomPetPurchaseState.pending) {
         return;
@@ -640,7 +720,9 @@ class BillingService extends ChangeNotifier {
       if (kDebugMode) {
         debugPrint('[Billing] purchase flow timed out before StoreKit result.');
       }
-      _setState(CustomPetPurchaseState.idle);
+      // No terminal StoreKit event means no permission to buy again. Deferred
+      // payments can outlive this timer, including Ask to Buy approval.
+      _setState(CustomPetPurchaseState.pending);
       await _finishStaleStoreKitFailedTransactions();
     });
   }
@@ -677,7 +759,7 @@ class BillingService extends ChangeNotifier {
     Map<String, dynamic> data = const {},
     required Duration timeout,
   }) async {
-    return FirebaseService.callFunction(
+    return _functionCaller(
       name,
       data: data,
       timeout: timeout,
@@ -686,6 +768,9 @@ class BillingService extends ChangeNotifier {
 
   String _readablePurchaseError(Object error) {
     if (error is _BillingVerificationException) return error.message;
+    if (error is SocketException) {
+      return '付款已完成，但暫時無法連線驗證。請確認網路後重試，不會重複扣款。';
+    }
     if (error is FirebaseFunctionsException) {
       final normalized = (error.message ?? '').toLowerCase();
       if (error.code == 'unauthenticated' ||
@@ -727,17 +812,23 @@ class BillingService extends ChangeNotifier {
     if (state != CustomPetPurchaseState.error) {
       _errorMessage = null;
     }
-    notifyListeners();
+    if (!_disposed) notifyListeners();
   }
 
   void _setError(String message) {
     _state = CustomPetPurchaseState.error;
     _errorMessage = message;
-    notifyListeners();
+    if (!_disposed) notifyListeners();
+  }
+
+  void _emitPurchaseOutcome(CustomPetPurchaseOutcome outcome) {
+    if (!_disposed) _purchaseOutcomeController.add(outcome);
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    _completeCreditConfirmation(false);
     _cancelPurchaseFlowRecovery();
     _purchaseSubscription?.cancel();
     _purchaseOutcomeController.close();

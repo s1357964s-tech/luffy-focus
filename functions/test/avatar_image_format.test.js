@@ -91,11 +91,11 @@ for (const state of ['normal', 'sleeping', 'failed']) {
     assert.equal(generator.uploads.length, 1);
     const uploaded = generator.uploads[0];
     assert.equal(uploaded.options.metadata.contentType, 'image/jpeg');
-    assert.equal(uploaded.path, `users/test-user/pets/test-pet/${state}.jpg`);
+    assert.match(uploaded.path, new RegExp(`^users/test-user/pets/test-pet/${state}-[^/]+\\.jpg$`));
     assert.deepEqual(uploaded.bytes, bytes);
     assert.equal(new URL(url).searchParams.get('alt'), 'media');
     assert.equal(decodeURIComponent(new URL(url).pathname),
-      `/v0/b/local-test-bucket/o/users/test-user/pets/test-pet/${state}.jpg`);
+      `/v0/b/local-test-bucket/o/${uploaded.path}`);
   });
 }
 
@@ -107,11 +107,23 @@ for (const [contentType, extension, hex] of [
     const bytes = Buffer.from(hex, 'hex');
     const generator = avatarGenerator({ mime_type: contentType, data: bytes.toString('base64') }, 'inline_data');
     await generator.generate();
-    assert.equal(generator.uploads[0].path, `users/test-user/pets/test-pet/normal.${extension}`);
+    assert.match(generator.uploads[0].path,
+      new RegExp(`^users/test-user/pets/test-pet/normal-[^/]+\\.${extension}$`));
     assert.equal(generator.uploads[0].options.metadata.contentType, contentType);
     assert.deepEqual(generator.uploads[0].bytes, bytes);
   });
 }
+
+test('generating the same state twice keeps separate download paths and tokens', async () => {
+  const generator = avatarGenerator({ mimeType: 'image/jpeg', data: '/9j/2Q==' });
+  const first = new URL(await generator.generate());
+  const second = new URL(await generator.generate());
+  assert.notEqual(first.pathname, second.pathname);
+  assert.equal(generator.uploads[0].options.metadata.metadata.firebaseStorageDownloadTokens,
+    first.searchParams.get('token'));
+  assert.equal(generator.uploads[1].options.metadata.metadata.firebaseStorageDownloadTokens,
+    second.searchParams.get('token'));
+});
 
 for (const contentType of [undefined, 'image/gif']) {
   test(`does not publish output with ${contentType || 'missing'} MIME type`, async () => {

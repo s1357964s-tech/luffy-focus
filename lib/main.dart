@@ -17,13 +17,20 @@ void main() async {
   // 確保在 runApp 之前完成 Flutter 綁定初始化
   WidgetsFlutterBinding.ensureInitialized();
 
+  var storeKitReady = defaultTargetPlatform != TargetPlatform.iOS;
   if (defaultTargetPlatform == TargetPlatform.iOS) {
-    try {
-      // The current Firebase verifier validates the StoreKit 1 app receipt.
-      // ignore: deprecated_member_use
-      await InAppPurchaseStoreKitPlatform.enableStoreKit1();
-    } catch (error) {
-      debugPrint('StoreKit1 初始化失敗，App 會繼續啟動並在內購頁重試: $error');
+    for (var attempt = 1; attempt <= 3 && !storeKitReady; attempt++) {
+      try {
+        // The backend accepts the StoreKit 1 app receipt, not a StoreKit 2 JWS.
+        // ignore: deprecated_member_use
+        await InAppPurchaseStoreKitPlatform.enableStoreKit1();
+        storeKitReady = !InAppPurchaseStoreKitPlatform.isStoreKit2Enabled;
+      } catch (error) {
+        debugPrint('StoreKit1 初始化失敗（第 $attempt 次）: $error');
+      }
+      if (!storeKitReady && attempt < 3) {
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+      }
     }
   }
 
@@ -44,7 +51,7 @@ void main() async {
   }
 
   // 初始化其它服務
-  final billingService = BillingService();
+  final billingService = BillingService(storeKitReady: storeKitReady);
   final aiPetService = AiPetService(storageService);
   final petRepository = PetRepository(storageService);
   final storyService = StoryService(storageService, petRepository);
