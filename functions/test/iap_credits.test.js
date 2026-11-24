@@ -40,6 +40,7 @@ function iapHarness({ initial = {}, apple = () => validReceipt(), image } = {}) 
   const versions = new Map();
   const appleRequests = [];
   const storageFiles = new Map();
+  const modelBodies = [];
   let imageRequests = 0;
   let retryMutation = null;
   let queryMutation = null;
@@ -156,6 +157,8 @@ function iapHarness({ initial = {}, apple = () => validReceipt(), image } = {}) 
         name: 'local-test-bucket',
         file: (path) => ({
           async save(bytes, options) { storageFiles.set(path, { bytes, options }); },
+          async download() { return [Buffer.from('server-owned-reference')]; },
+          async getMetadata() { return [{ contentType: 'image/jpeg' }]; },
         }),
       }) }),
     },
@@ -163,6 +166,7 @@ function iapHarness({ initial = {}, apple = () => validReceipt(), image } = {}) 
       async post(url, body) {
         if (url.startsWith('https://generativelanguage.googleapis.com/')) {
           imageRequests += 1;
+          modelBodies.push(body);
           if (!image) throw new Error('Unexpected image generation');
           return { data: await image(url, body) };
         }
@@ -192,6 +196,7 @@ function iapHarness({ initial = {}, apple = () => validReceipt(), image } = {}) 
   return {
     appleRequests,
     storageFiles,
+    modelBodies,
     imageRequests: () => imageRequests,
     documents,
     get: (path) => documents.get(path),
@@ -226,6 +231,194 @@ function deferred() {
 
 const imageResponse = () => ({
   candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/jpeg', data: '/9j/2Q==' } }] } }],
+});
+
+function stateRequest() {
+  return { petId: 'pet-1', species: 'dog', imageBase64: 'untrusted-client-photo', imageMimeType: 'image/png', force: true };
+}
+
+function paidPetForRepair(extra = {}) {
+  return {
+    status: 'ready', purchaseStatus: 'consumed', species: 'cat',
+    originalImagePath: 'users/alice/pets/pet-1/original.jpg',
+    normalImageUrl: 'https://example.test/normal.jpg',
+    sleepingImageUrl: 'https://example.test/normal.jpg',
+    failedImageUrl: 'https://example.test/normal.jpg',
+    avatarStatesVersion: 1,
+    ...extra,
+  };
+}
+
+for (const endpoint of ['generatePetAvatarStates', 'repairPetAvatarStates']) {
+  test(`${endpoint}: an unpaid request cannot call the image model or create a pet`, async () => {
+    const app = iapHarness({ image: imageResponse });
+    await assert.rejects(app.call(endpoint, stateRequest()), { code: 'not-found' });
+    assert.equal(app.imageRequests(), 0);
+    assert.equal(app.documents.size, 0);
+  });
+
+  for (const purchaseStatus of [undefined, 'released']) {
+    test(`${endpoint}: a ${purchaseStatus || 'missing'} payment entitlement cannot repair images`, async () => {
+      const pet = paidPetForRepair({ purchaseStatus });
+      const app = iapHarness({ initial: { [petPath()]: pet }, image: imageResponse });
+      await assert.rejects(app.call(endpoint, stateRequest()), { code: 'failed-precondition' });
+      assert.equal(app.imageRequests(), 0);
+      assert.deepEqual(app.get(petPath()), pet);
+    });
+  }
+
+  test(`${endpoint}: force cannot regenerate an already complete paid pet`, async () => {
+    const pet = paidPetForRepair({ sleepingImageUrl: 'https://example.test/sleep.jpg', failedImageUrl: 'https://example.test/fail.jpg', avatarStatesVersion: 3 });
+    const app = iapHarness({ initial: { [petPath()]: pet }, image: imageResponse });
+    const result = await app.call(endpoint, stateRequest());
+    assert.equal(result.sleepingImageUrl, pet.sleepingImageUrl);
+    assert.equal(result.failedImageUrl, pet.failedImageUrl);
+    assert.equal(app.imageRequests(), 0);
+    assert.deepEqual(app.get(petPath()), pet);
+  });
+}
+
+test('secondary-state generation uses the paid pet reference and is idempotent across both endpoints', async () => {
+  const app = iapHarness({ initial: { [petPath()]: paidPetForRepair() }, image: imageResponse });
+  const first = await app.call('generatePetAvatarStates', stateRequest());
+  const second = await app.call('repairPetAvatarStates', stateRequest());
+  assert.equal(first.sleepingImageUrl, second.sleepingImageUrl);
+  assert.equal(app.imageRequests(), 2);
+  for (const body of app.modelBodies) {
+    assert.equal(body.contents[0].parts[1].inline_data.data, Buffer.from('server-owned-reference').toString('base64'));
+    assert.equal(body.contents[0].parts[1].inline_data.mime_type, 'image/jpeg');
+  }
+  assert.equal(app.get(petPath()).purchaseStatus, 'consumed');
+  assert.equal(app.get(petPath()).stateImagesStatus, 'ready');
+  assert.equal(app.get(creditPath()), undefined);
+});
+
+test('concurrent state repairs across both endpoints make only one pair of images', async () => {
+  const images = deferred();
+  const started = deferred();
+  const app = iapHarness({ initial: { [petPath()]: paidPetForRepair() }, image: () => { started.resolve(); return images.promise; } });
+  const first = app.call('repairPetAvatarStates', stateRequest());
+  await started.promise;
+  const duplicate = app.call('generatePetAvatarStates', stateRequest())
+    .then(() => ({ code: 'unexpected-success' }), (error) => error);
+  // Let the second transaction reach its ownership check before releasing the model.
+  await new Promise((resolve) => setImmediate(resolve));
+  images.resolve(imageResponse());
+  await first;
+  assert.equal((await duplicate).code, 'aborted');
+  assert.equal(app.imageRequests(), 2);
+});
+
+test('a late state repair cannot recreate a deleted paid pet', async () => {
+  const images = deferred();
+  const started = deferred();
+  const app = iapHarness({ initial: { [petPath()]: paidPetForRepair() }, image: () => { started.resolve(); return images.promise; } });
+  const repairing = app.call('repairPetAvatarStates', stateRequest());
+  await started.promise;
+  app.documents.delete(petPath());
+  images.resolve(imageResponse());
+  await assert.rejects(repairing, { code: 'failed-precondition' });
+  assert.equal(app.get(petPath()), undefined);
+});
+
+test('public cancellation cannot recycle a credit after its three images were delivered', async () => {
+  const app = iapHarness({ initial: { [creditPath()]: { unusedCount: 1, reservedCount: 0 } }, image: imageResponse });
+  const images = await app.generate('paid-pet');
+  assert.ok(images.normalImageUrl && images.sleepingImageUrl && images.failedImageUrl);
+  const canceled = await app.call('releaseCustomPetPurchaseCredit', { petId: 'paid-pet' });
+  assert.equal(canceled.unusedCredits, 0);
+  await assert.rejects(app.generate('free-pet'), { code: 'failed-precondition' });
+  assert.equal(app.imageRequests(), 3);
+  assert.equal(app.get(petPath('paid-pet')).status, 'generated');
+  // Keeping the paid draft also lets a user finish naming it after a canceled return.
+  await app.call('saveGeneratedPetName', { petId: 'paid-pet', name: 'Mochi' });
+  assert.equal(app.get(creditPath()).consumedCount, 1);
+});
+
+test('public cancellation cannot free a live generation reservation', async () => {
+  const images = deferred();
+  const started = deferred();
+  const app = iapHarness({ initial: { [creditPath()]: { unusedCount: 1, reservedCount: 0 } }, image: () => { started.resolve(); return images.promise; } });
+  const generating = app.generate();
+  await started.promise;
+  const result = await app.call('releaseCustomPetPurchaseCredit', { petId: 'pet-1' });
+  images.resolve(imageResponse());
+  // Settle the original generation before assertions so a regression is not a hanging test.
+  const outcome = await generating.then(() => 'generated', (error) => error.code);
+  assert.equal(result.unusedCredits, 0);
+  assert.equal(outcome, 'generated');
+  assert.equal(app.get(creditPath()).reservedCount, 1);
+});
+
+test('public cancellation can recover only a genuinely expired generation once', async () => {
+  const app = iapHarness({ initial: {
+    [creditPath()]: { unusedCount: 0, reservedCount: 1 },
+    [petPath()]: { status: 'generating', purchaseStatus: 'reserved', purchaseReservationId: 'timed-out', purchaseReservationExpiresAtMs: Date.now() - 1000 },
+  } });
+  await app.call('releaseCustomPetPurchaseCredit', { petId: 'pet-1' });
+  await app.call('releaseCustomPetPurchaseCredit', { petId: 'pet-1' });
+  assert.equal(app.get(creditPath()).unusedCount, 1);
+  assert.equal(app.get(creditPath()).reservedCount, 0);
+  assert.equal(app.get(petPath()), undefined);
+});
+
+for (const endpoint of ['generatePetAvatarStates', 'repairPetAvatarStates']) {
+  test(`${endpoint}: a running main generation cannot open a second model job`, async () => {
+    const app = iapHarness({ initial: { [petPath()]: paidPetForRepair({ purchaseStatus: 'reserved', status: 'generating' }) }, image: imageResponse });
+    await assert.rejects(app.call(endpoint, stateRequest()), { code: 'failed-precondition' });
+    assert.equal(app.imageRequests(), 0);
+  });
+}
+
+test('a delivered paid draft can repair its states without consuming or refunding its reservation', async () => {
+  const app = iapHarness({ initial: {
+    [petPath()]: paidPetForRepair({ purchaseStatus: 'reserved', status: 'generated' }),
+    [creditPath()]: { unusedCount: 0, reservedCount: 1, consumedCount: 0 },
+  }, image: imageResponse });
+  await app.call('repairPetAvatarStates', stateRequest());
+  assert.equal(app.imageRequests(), 2);
+  assert.equal(app.get(petPath()).purchaseStatus, 'reserved');
+  assert.deepEqual(app.get(creditPath()), { unusedCount: 0, reservedCount: 1, consumedCount: 0 });
+});
+
+test('a failed state repair unlocks only its own lease so a genuine failure can be retried', async () => {
+  let failing = true;
+  const app = iapHarness({ initial: { [petPath()]: paidPetForRepair() }, image: () => {
+    if (failing) throw new Error('Provider unavailable');
+    return imageResponse();
+  } });
+  await assert.rejects(app.call('repairPetAvatarStates', stateRequest()), { code: 'internal' });
+  assert.equal(app.get(petPath()).avatarStateRepairId, null);
+  assert.equal(app.get(petPath()).stateImagesStatus, 'error');
+  failing = false;
+  await app.call('generatePetAvatarStates', stateRequest());
+  assert.equal(app.get(petPath()).stateImagesStatus, 'ready');
+  assert.equal(app.imageRequests(), 4);
+});
+
+test('a stale failed repair cannot clear the lease taken over after its expiry', async () => {
+  const firstImages = deferred();
+  const secondImages = deferred();
+  const firstStarted = deferred();
+  const secondStarted = deferred();
+  let calls = 0;
+  const app = iapHarness({ initial: { [petPath()]: paidPetForRepair() }, image: () => {
+    calls += 1;
+    if (calls <= 2) { firstStarted.resolve(); return firstImages.promise; }
+    secondStarted.resolve(); return secondImages.promise;
+  } });
+  const first = app.call('repairPetAvatarStates', stateRequest());
+  await firstStarted.promise;
+  app.get(petPath()).avatarStateRepairExpiresAtMs = Date.now() - 1000;
+  const second = app.call('generatePetAvatarStates', stateRequest());
+  await secondStarted.promise;
+  const newLease = app.get(petPath()).avatarStateRepairId;
+  firstImages.reject(new Error('Old provider response failed'));
+  await assert.rejects(first, { code: 'internal' });
+  assert.equal(app.get(petPath()).avatarStateRepairId, newLease);
+  secondImages.resolve(imageResponse());
+  await second;
+  assert.equal(app.get(petPath()).stateImagesStatus, 'ready');
 });
 
 test('one transaction cannot grant credit to a second uid', async () => {
@@ -320,7 +513,8 @@ test('a late generation response cannot recreate a released draft', async () => 
   });
   const generating = app.generate();
   await started.promise;
-  await app.call('releaseCustomPetPurchaseCredit', { petId: 'pet-1' });
+  // Simulate a trusted server rollback, not a client cancellation.
+  await app.release('pet-1', { deletePet: true });
   images.resolve(imageResponse());
   await assert.rejects(generating, { code: 'failed-precondition' });
   assert.equal(app.get(petPath()), undefined);
@@ -384,7 +578,8 @@ test('a stale failed generation cannot release a newer reservation for the same 
   });
   const first = app.generate();
   await firstStarted.promise;
-  await app.call('releaseCustomPetPurchaseCredit', { petId: 'pet-1' });
+  // Simulate a trusted server rollback, not a client cancellation.
+  await app.release('pet-1', { deletePet: true });
   const second = app.generate();
   await secondStarted.promise;
   firstImages.reject(new Error('Simulated model network failure'));
@@ -752,7 +947,8 @@ test('stale image uploads cannot invalidate the newer committed draft download U
   });
   const first = app.generate();
   await firstStarted.promise;
-  await app.call('releaseCustomPetPurchaseCredit', { petId: 'pet-1' });
+  // Simulate a trusted server rollback, not a client cancellation.
+  await app.release('pet-1', { deletePet: true });
   const second = app.generate();
   await secondStarted.promise;
   secondImages.resolve(imageResponse());

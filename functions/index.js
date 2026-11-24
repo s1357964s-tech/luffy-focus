@@ -911,216 +911,127 @@ exports.generatePetAvatar = onCall(
   },
 );
 
-exports.repairPetAvatarStates = onCall(
-  { secrets: [geminiApiKey], timeoutSeconds: 300, memory: '1GiB' },
-  async (request) => {
-    const functionStartedAt = Date.now();
-    const uid = requireAuth(request);
-    const petId = requireString(request.data?.petId, 'petId');
-    const petRef = db.doc(`users/${uid}/pets/${petId}`);
-    const snapshot = await petRef.get();
-    if (!snapshot.exists) {
-      throw new HttpsError('not-found', 'Pet not found.');
-    }
+function assertPaidPetForStateRepair(pet) {
+  const paidDraft = pet.purchaseStatus === 'reserved' && pet.status === 'generated';
+  const savedPaidPet = pet.purchaseStatus === 'consumed' && pet.status === 'ready';
+  if (!paidDraft && !savedPaidPet) {
+    throw new HttpsError('failed-precondition', 'This pet has no verified creation credit.');
+  }
+}
 
+function avatarStatesResponse(pet) {
+  return {
+    normalImageUrl: pet.normalImageUrl,
+    sleepingImageUrl: pet.sleepingImageUrl,
+    failedImageUrl: pet.failedImageUrl,
+    stateImagesStatus: pet.stateImagesStatus || 'ready',
+    avatarStatesVersion: pet.avatarStatesVersion,
+  };
+}
+
+async function repairPaidPetAvatarStates(uid, petId) {
+  const petRef = db.doc(`users/${uid}/pets/${petId}`);
+  const repairId = randomUUID();
+  const claim = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(petRef);
+    if (!snapshot.exists) throw new HttpsError('not-found', 'Pet not found.');
     const pet = snapshot.data() || {};
-    const normalImageUrl = optionalString(pet.normalImageUrl, 1000);
-    const sleepingImageUrl = optionalString(pet.sleepingImageUrl, 1000);
-    const failedImageUrl = optionalString(pet.failedImageUrl, 1000);
-    const avatarStatesVersion = Number(pet.avatarStatesVersion || 0);
-    const forceRepair = request.data?.force === true;
-    if (!forceRepair &&
-        avatarStatesVersion >= AVATAR_STATES_VERSION &&
-        normalImageUrl &&
-        sleepingImageUrl &&
-        failedImageUrl &&
-        normalImageUrl !== sleepingImageUrl &&
-        normalImageUrl !== failedImageUrl &&
-        sleepingImageUrl !== failedImageUrl) {
-      return {
-        normalImageUrl,
-        sleepingImageUrl,
-        failedImageUrl,
-        stateImagesStatus: pet.stateImagesStatus || 'ready',
-        avatarStatesVersion,
-      };
+    assertPaidPetForStateRepair(pet);
+    const urls = [pet.normalImageUrl, pet.sleepingImageUrl, pet.failedImageUrl];
+    // A client force flag never authorizes another billable generation.
+    if (Number(pet.avatarStatesVersion || 0) >= AVATAR_STATES_VERSION &&
+        urls.every((url) => typeof url === 'string' && url.length > 0) &&
+        new Set(urls).size === 3) {
+      return { cached: true, pet };
     }
+    if (!pet.normalImageUrl) {
+      throw new HttpsError('failed-precondition', 'Generate the paid pet avatar before repairing its states.');
+    }
+    if (pet.avatarStateRepairId && pet.avatarStateRepairExpiresAtMs > Date.now()) {
+      throw new HttpsError('aborted', 'Pet image states are already being repaired.');
+    }
+    transaction.set(petRef, {
+      avatarStateRepairId: repairId,
+      avatarStateRepairExpiresAtMs: Date.now() + CUSTOM_PET_GENERATION_LEASE_MS,
+      stateImagesStatus: 'generating',
+    }, { merge: true });
+    return { cached: false, pet };
+  });
+  if (claim.cached) return avatarStatesResponse(claim.pet);
 
+  const pet = claim.pet;
+  try {
+    // Repair only the server-owned paid pet; ignore legacy client photo/traits.
+    const imageInput = await repairImageInputForPet({
+      uid, petId,
+      originalImagePath: optionalString(pet.originalImagePath, 240),
+      normalImageUrl: optionalString(pet.normalImageUrl, 1000),
+    });
     const species = optionalString(pet.species, 20) || 'dog';
     const breed = optionalString(pet.breed, 80);
-    const breedTraits = optionalString(pet.breedTraits, 900) ||
-        breedTraitText(species, breed);
-    const visualTraits = optionalTraits(pet.visualTraits, 7, 110);
-    const featureNote = optionalString(pet.featureNote);
-    const originalImagePath = optionalString(pet.originalImagePath, 240);
+    const prompts = avatarPrompts({
+      species, breed,
+      breedTraits: optionalString(pet.breedTraits, 900) || breedTraitText(species, breed),
+      visualTraits: optionalTraits(pet.visualTraits, 7, 110),
+      featureNote: optionalString(pet.featureNote),
+    });
     const apiKey = geminiApiKey.value();
-
-    try {
-      logger.info('Pet avatar state repair request received', {
-        uid,
-        petId,
-        species,
-        breed,
-        visualTraitCount: visualTraits.length,
-        hasFeatureNote: featureNote.length > 0,
-        hasOriginalImagePath: originalImagePath.length > 0,
-        forceRepair,
-      });
-
-      const imageInput = await repairImageInputForPet({
-        uid,
-        petId,
-        originalImagePath,
-        normalImageUrl,
-      });
-      const prompts = avatarPrompts({
-        species,
-        breed,
-        breedTraits,
-        visualTraits,
-        featureNote,
-      });
-
-      const [repairedSleepingImageUrl, repairedFailedImageUrl] =
-          await Promise.all([
-            generateAndUploadAvatarState({
-              uid,
-              petId,
-              state: 'sleeping',
-              apiKey,
-              imageBase64: imageInput.imageBase64,
-              imageMimeType: imageInput.imageMimeType,
-              prompt: prompts.sleeping,
-            }),
-            generateAndUploadAvatarState({
-              uid,
-              petId,
-              state: 'failed',
-              apiKey,
-              imageBase64: imageInput.imageBase64,
-              imageMimeType: imageInput.imageMimeType,
-              prompt: prompts.failed,
-            }),
-          ]);
-
-      await petRef.set({
-        sleepingImageUrl: repairedSleepingImageUrl,
-        failedImageUrl: repairedFailedImageUrl,
-        avatarStatesVersion: AVATAR_STATES_VERSION,
-        stateImagesStatus: 'ready',
+    const [sleepingImageUrl, failedImageUrl] = await Promise.all(
+      ['sleeping', 'failed'].map((state) => generateAndUploadAvatarState({
+        uid, petId, state, apiKey, ...imageInput, prompt: prompts[state],
+      })),
+    );
+    const states = {
+      sleepingImageUrl, failedImageUrl,
+      avatarStatesVersion: AVATAR_STATES_VERSION,
+      stateImagesStatus: 'ready',
+    };
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(petRef);
+      const current = snapshot.data() || {};
+      if (!snapshot.exists || current.avatarStateRepairId !== repairId) {
+        throw new HttpsError('failed-precondition', 'This pet image repair is no longer active.');
+      }
+      assertPaidPetForStateRepair(current);
+      transaction.set(petRef, {
+        ...states,
+        avatarStateRepairId: null,
+        avatarStateRepairExpiresAtMs: null,
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, { merge: true });
+    });
+    return avatarStatesResponse({ ...pet, ...states });
+  } catch (error) {
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(petRef);
+      if (snapshot.exists && snapshot.data()?.avatarStateRepairId === repairId) {
+        transaction.set(petRef, {
+          avatarStateRepairId: null,
+          avatarStateRepairExpiresAtMs: null,
+          stateImagesStatus: 'error',
+        }, { merge: true });
+      }
+    });
+    logger.error('Paid pet image state repair failed', {
+      uid, petId, errorCode: error instanceof HttpsError ? error.code : 'internal',
+    });
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError('internal', 'Pet avatar states repair failed.');
+  }
+}
 
-      logger.info('Pet avatar state repair finished', {
-        uid,
-        petId,
-        totalMs: Date.now() - functionStartedAt,
-      });
-
-      return {
-        normalImageUrl,
-        sleepingImageUrl: repairedSleepingImageUrl,
-        failedImageUrl: repairedFailedImageUrl,
-        avatarStatesVersion: AVATAR_STATES_VERSION,
-        stateImagesStatus: 'ready',
-      };
-    } catch (error) {
-      logger.error('Pet avatar state repair failed', {
-        uid,
-        petId,
-        totalMs: Date.now() - functionStartedAt,
-        errorMessage: error?.message,
-        error,
-      });
-      if (error instanceof HttpsError) throw error;
-      throw new HttpsError('internal', error.message || 'Pet avatar state repair failed.');
-    }
-  },
+exports.repairPetAvatarStates = onCall(
+  { secrets: [geminiApiKey], timeoutSeconds: 300, memory: '1GiB' },
+  async (request) => repairPaidPetAvatarStates(
+    requireAuth(request), requireString(request.data?.petId, 'petId'),
+  ),
 );
 
 exports.generatePetAvatarStates = onCall(
-  { secrets: [geminiApiKey], timeoutSeconds: 180, memory: '512MiB' },
-  async (request) => {
-    const functionStartedAt = Date.now();
-    const uid = requireAuth(request);
-    const petId = requireString(request.data?.petId, 'petId');
-    const imageBase64 = requireString(request.data?.imageBase64, 'imageBase64');
-    const imageMimeType = normalizeImageMimeType(request.data?.imageMimeType);
-    const featureNote = optionalString(request.data?.featureNote);
-    const species = requireString(request.data?.species, 'species');
-    const breed = optionalString(request.data?.breed, 80);
-    const visualTraits = optionalTraits(request.data?.visualTraits, 7, 110);
-    const breedTraits = optionalString(request.data?.breedTraits, 900) || breedTraitText(species, breed);
-    const apiKey = geminiApiKey.value();
-    const prompts = avatarPrompts({ species, breed, breedTraits, visualTraits, featureNote });
-
-    try {
-      logger.info('Pet avatar secondary states generation request received', {
-        uid,
-        petId,
-        species,
-        breed,
-        imageModel: GEMINI_IMAGE_MODEL,
-        imageMimeType,
-        imageBase64Length: imageBase64.length,
-        hasFeatureNote: featureNote.length > 0,
-        featureNotePreview: featureNote.slice(0, 80),
-        visualTraitCount: visualTraits.length,
-      });
-
-      const [sleepingImageUrl, failedImageUrl] = await Promise.all([
-        generateAndUploadAvatarState({
-          uid,
-          petId,
-          state: 'sleeping',
-          apiKey,
-          imageBase64,
-          imageMimeType,
-          prompt: prompts.sleeping,
-        }),
-        generateAndUploadAvatarState({
-          uid,
-          petId,
-          state: 'failed',
-          apiKey,
-          imageBase64,
-          imageMimeType,
-          prompt: prompts.failed,
-        }),
-      ]);
-
-      await db.doc(`users/${uid}/pets/${petId}`).set({
-        sleepingImageUrl,
-        failedImageUrl,
-        avatarStatesVersion: AVATAR_STATES_VERSION,
-        stateImagesStatus: 'ready',
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-
-      logger.info('Pet avatar secondary states generation finished', {
-        uid,
-        petId,
-        totalMs: Date.now() - functionStartedAt,
-      });
-
-      return {
-        sleepingImageUrl,
-        failedImageUrl,
-        avatarStatesVersion: AVATAR_STATES_VERSION,
-        stateImagesStatus: 'ready',
-      };
-    } catch (error) {
-      logger.error('Pet avatar secondary states generation failed', {
-        uid,
-        petId,
-        totalMs: Date.now() - functionStartedAt,
-        errorMessage: error?.message,
-        error,
-      });
-      if (error instanceof HttpsError) throw error;
-      throw new HttpsError('internal', error.message || 'Pet avatar states generation failed.');
-    }
-  },
+  { secrets: [geminiApiKey], timeoutSeconds: 300, memory: '1GiB' },
+  async (request) => repairPaidPetAvatarStates(
+    requireAuth(request), requireString(request.data?.petId, 'petId'),
+  ),
 );
 
 exports.getCustomPetPurchaseCredit = onCall(
@@ -1290,7 +1201,16 @@ exports.releaseCustomPetPurchaseCredit = onCall(
   async (request) => {
     const uid = requireAuth(request);
     const petId = requireString(request.data?.petId, 'petId');
-    await releaseCustomPetCreditReservation(uid, petId, { deletePet: true });
+    const pet = (await db.doc(`users/${uid}/pets/${petId}`).get()).data() || {};
+    // A client must not refund a generation it can already read from Storage.
+    // Actual model failures roll back internally; hard timeouts recover only
+    // after the server-owned generation lease expires. Keep delivered drafts
+    // available for naming instead of giving back a reusable creation credit.
+    await releaseCustomPetCreditReservation(uid, petId, {
+      deletePet: true,
+      expiredOnly: true,
+      reservationId: pet.purchaseReservationId,
+    });
     return {
       ok: true,
       unusedCredits: await unusedCustomPetCredits(uid),

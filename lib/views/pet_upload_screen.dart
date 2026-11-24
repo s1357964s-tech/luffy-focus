@@ -108,7 +108,7 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
       case CustomPetPurchaseOutcome.failed:
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('付款失敗，請稍後再試。'),
+            content: Text('無法確認付款結果，請先查詢訂單，勿重複購買。'),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -316,9 +316,26 @@ class _PetUploadScreenState extends State<PetUploadScreen> {
 
   Future<void> _discardDraftAndPop(BuildContext context) async {
     if (_isLeaving) return;
-    _isLeaving = true;
-
     final viewModel = context.read<PetViewModel>();
+    final uploadState = viewModel.uploadState;
+    if (uploadState == PetUploadState.naming) {
+      // The shared view model owns this generated draft. Leave it intact so a
+      // failed name save can be retried when the upload screen is opened again.
+      _isLeaving = true;
+      _popScreen(context);
+      return;
+    }
+    if (uploadState == PetUploadState.analyzing ||
+        uploadState == PetUploadState.generating) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('寵物正在處理中，請等待完成後再返回。'),
+        ),
+      );
+      return;
+    }
+
+    _isLeaving = true;
     await viewModel.discardPendingUpload();
     _clearLocalDraft();
 

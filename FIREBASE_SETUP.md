@@ -10,6 +10,8 @@
 - 生成圖片依模型回傳的 MIME 儲存：JPEG 使用 `.jpg`／`image/jpeg`，PNG 與 WebP 也保留對應格式。
 - 照片辨識使用 `thinkingBudget=0`、1024 個輸出 tokens，避免短 JSON 被思考預算截斷；僅記錄 token／完成原因等診斷資訊。
 - 已驗證 Apple 訂單會寫入全域 `appStoreTransactions/{environment}_{transactionId}` owner 索引，防止同一訂單跨帳號重複入帳。生成中的預留名額有 330 秒 lease；等待命名的完成草稿不以這個短 lease 退回。
+- 公開 `releaseCustomPetPurchaseCredit` 僅回收確實已過期的生成預留；不能用取消退回已生成或仍在生成的名額。實際模型失敗仍由後端內部回滾，已交付圖片草稿保留供命名。
+- `generatePetAvatarStates` 與 `repairPetAvatarStates` 共用付費寵物授權及交易鎖，只修復伺服器現有寵物；忽略客戶端替換照片與 `force` 重生要求，完整三態直接回傳既有結果。
 - 目前 Firebase 設定僅支援 iOS；GitHub 更新不會自動部署 Functions，也不會建立可使用的 Flutter Web 版本。
 
 ## 1. 创建 Firebase 项目

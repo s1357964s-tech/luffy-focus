@@ -461,8 +461,35 @@ class BillingService extends ChangeNotifier {
   Future<void> _handlePurchaseUpdates(
     List<PurchaseDetails> purchaseDetailsList,
   ) async {
+    // A native update batch can contain an earlier state and a paid state for
+    // the same transaction. Resolve that ordering before emitting UI outcomes.
+    final paidTransactionsInBatch = purchaseDetailsList
+        .where((purchase) =>
+            purchase.productID == customPetProductId &&
+            purchase.purchaseID?.isNotEmpty == true &&
+            (purchase.status == PurchaseStatus.purchased ||
+                purchase.status == PurchaseStatus.restored))
+        .map(_transactionKey)
+        .toSet();
     for (final purchase in purchaseDetailsList) {
       if (purchase.productID != customPetProductId) continue;
+
+      final key = _transactionKey(purchase);
+      final hasPaidTransaction = purchase.purchaseID?.isNotEmpty == true &&
+          (_pendingPurchases.containsKey(key) ||
+              _verifiedTransactions.contains(key) ||
+              paidTransactionsInBatch.contains(key));
+      if (hasPaidTransaction &&
+          (purchase.status == PurchaseStatus.pending ||
+              purchase.status == PurchaseStatus.error ||
+              purchase.status == PurchaseStatus.canceled)) {
+        // Once this transaction was reported paid, a late earlier state must
+        // not fail its verification or undo its successful UI outcome. A new
+        // transaction, or an error without an ID, still follows normal handling.
+        debugPrint('[Billing] ignored stale ${purchase.status.name} update '
+            'for a previously paid transaction');
+        continue;
+      }
 
       debugPrint(
           '[Billing] _handlePurchaseUpdates: productID=${purchase.productID}, status=${purchase.status}, error=${purchase.error?.code}:${purchase.error?.message}');
@@ -502,7 +529,6 @@ class BillingService extends ChangeNotifier {
           debugPrint(
               '[Billing] purchase confirmed by Apple, starting verification');
           _cancelPurchaseFlowRecovery();
-          final key = _transactionKey(purchase);
           if (purchase.purchaseID == null || purchase.purchaseID!.isEmpty) {
             _setError('付款交易編號尚未取得，請稍後重新確認付款結果。');
             _completeCreditConfirmation(false);

@@ -136,6 +136,160 @@ void main() {
     expect(store.completed, ['tx-1']);
   });
 
+  for (final status in [
+    PurchaseStatus.pending,
+    PurchaseStatus.error,
+    PurchaseStatus.canceled,
+  ]) {
+    test('verified transaction ignores a stale ${status.name} callback',
+        () async {
+      final store = FakeBillingStore();
+      final backend = FakeBillingBackend();
+      final service = await start(store, backend);
+      final outcomes = <CustomPetPurchaseOutcome>[];
+      final listener = service.purchaseOutcomeStream.listen(outcomes.add);
+      addTearDown(listener.cancel);
+      store.emit(billingPurchase());
+      await eventually(() => service.state == CustomPetPurchaseState.purchased);
+      outcomes.clear();
+
+      store.emit(billingPurchase(
+        status: status,
+        pendingComplete: status != PurchaseStatus.pending,
+      ));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(service.state, CustomPetPurchaseState.purchased);
+      expect(service.errorMessage, isNull);
+      expect(service.isPaymentPending, isFalse);
+      expect(service.unusedCredits, 1);
+      expect(outcomes, isEmpty);
+      expect(store.completed, ['tx-1']);
+      expect(backend.verificationCalls, 1);
+    });
+  }
+
+  test(
+      'a paid transaction cannot be failed while its server verification is pending',
+      () async {
+    final store = FakeBillingStore();
+    final gate = Completer<void>();
+    final backend = FakeBillingBackend()..verificationGate = gate;
+    final service = await start(store, backend);
+    final outcomes = <CustomPetPurchaseOutcome>[];
+    final listener = service.purchaseOutcomeStream.listen(outcomes.add);
+    addTearDown(listener.cancel);
+    store.emit(billingPurchase());
+    await eventually(() => backend.verificationCalls == 1);
+    final confirmation = service.waitForCreditConfirmation();
+
+    store.emit(billingPurchase(status: PurchaseStatus.error));
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    final stateBeforeVerification = service.state;
+    final outcomesBeforeVerification = List.of(outcomes);
+    final finishedBeforeVerification = List.of(store.completed);
+    gate.complete();
+
+    expect(await confirmation, isTrue);
+    expect(stateBeforeVerification, CustomPetPurchaseState.loading);
+    expect(outcomesBeforeVerification, [CustomPetPurchaseOutcome.purchased]);
+    expect(finishedBeforeVerification, isEmpty);
+    expect(service.unusedCredits, 1);
+    expect(store.completed, ['tx-1']);
+  });
+
+  test(
+      'a paid update in the same batch supersedes an earlier failed update for that transaction',
+      () async {
+    final store = FakeBillingStore();
+    final backend = FakeBillingBackend();
+    final service = await start(store, backend);
+    final outcomes = <CustomPetPurchaseOutcome>[];
+    final listener = service.purchaseOutcomeStream.listen(outcomes.add);
+    addTearDown(listener.cancel);
+
+    store.updates.add([
+      billingPurchase(status: PurchaseStatus.error),
+      billingPurchase(),
+    ]);
+    await eventually(() => service.state == CustomPetPurchaseState.purchased);
+
+    expect(outcomes, [CustomPetPurchaseOutcome.purchased]);
+    expect(service.unusedCredits, 1);
+    expect(store.completed, ['tx-1']);
+  });
+
+  test(
+      'a genuinely different transaction failure is still reported after a previous purchase succeeds',
+      () async {
+    final store = FakeBillingStore();
+    final backend = FakeBillingBackend();
+    final service = await start(store, backend);
+    store.emit(billingPurchase());
+    await eventually(() => service.state == CustomPetPurchaseState.purchased);
+
+    final outcome = service.purchaseOutcomeStream.first;
+    store.emit(billingPurchase(id: 'tx-2', status: PurchaseStatus.error));
+
+    expect(await outcome, CustomPetPurchaseOutcome.failed);
+    expect(service.state, CustomPetPurchaseState.error);
+    expect(service.unusedCredits, 1);
+    expect(backend.verificationCalls, 1);
+  });
+
+  test(
+      'an error without a transaction id cannot be assumed to belong to a verified purchase',
+      () async {
+    final store = FakeBillingStore();
+    final backend = FakeBillingBackend();
+    final service = await start(store, backend);
+    store.emit(billingPurchase());
+    await eventually(() => service.state == CustomPetPurchaseState.purchased);
+    final outcome = service.purchaseOutcomeStream.first;
+    store.emit(PurchaseDetails(
+      productID: BillingService.customPetProductId,
+      verificationData: PurchaseVerificationData(
+        localVerificationData: '',
+        serverVerificationData: '',
+        source: 'app_store',
+      ),
+      transactionDate: null,
+      status: PurchaseStatus.error,
+    ));
+
+    expect(await outcome, CustomPetPurchaseOutcome.failed);
+    expect(service.state, CustomPetPurchaseState.error);
+    expect(service.unusedCredits, 1);
+  });
+
+  test(
+      'an early error is reported until a separate paid callback supplies new evidence',
+      () async {
+    final store = FakeBillingStore();
+    final backend = FakeBillingBackend();
+    final service = await start(store, backend);
+    final outcomes = <CustomPetPurchaseOutcome>[];
+    final listener = service.purchaseOutcomeStream.listen(outcomes.add);
+    addTearDown(listener.cancel);
+
+    store.emit(billingPurchase(status: PurchaseStatus.error));
+    await eventually(() => outcomes.isNotEmpty);
+    expect(outcomes, [CustomPetPurchaseOutcome.failed]);
+    expect(service.unusedCredits, 0);
+
+    store.emit(billingPurchase());
+    await eventually(() => service.state == CustomPetPurchaseState.purchased);
+
+    expect(outcomes, [
+      CustomPetPurchaseOutcome.failed,
+      CustomPetPurchaseOutcome.purchased,
+    ]);
+    expect(service.unusedCredits, 1);
+    expect(backend.verificationCalls, 1);
+  });
+
   test('credit is available only after a successful backend receipt response',
       () async {
     final store = FakeBillingStore();
