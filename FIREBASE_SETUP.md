@@ -2,6 +2,14 @@
 
 这份指引用于把「自定义宠物卡通生成」和「专属故事生成」接到 Firebase。
 
+## 目前的正式部署架構
+
+- iOS App 直接呼叫 Firebase 專案 `luffy-focus` 的 Cloud Functions，區域為 `us-central1`；後端不經過 Vercel。
+- 圖片辨識與故事模型為 `gemini-2.5-flash`；生圖模型為 [`gemini-3-pro-image`](https://ai.google.dev/gemini-api/docs/models/gemini-3-pro-image)。
+- 後端部署使用 Node.js 22。Google 已於 2026-10-30 停止接受 Node.js 20 的部署。
+- 生成圖片依模型回傳的 MIME 儲存：JPEG 使用 `.jpg`／`image/jpeg`，PNG 與 WebP 也保留對應格式。
+- 目前 Firebase 設定僅支援 iOS；GitHub 更新不會自動部署 Functions，也不會建立可使用的 Flutter Web 版本。
+
 ## 1. 创建 Firebase 项目
 
 1. 打开 https://console.firebase.google.com/
@@ -38,7 +46,7 @@ dart pub global run flutterfire_cli:flutterfire configure
 flutterfire configure
 ```
 
-这会替换 `lib/firebase_options.dart`。当前仓库里的该文件只是占位文件，不能连接真实 Firebase。
+这会替换 `lib/firebase_options.dart`。目前檔案已設定正式 iOS Firebase App；只有新增平台或更換 Firebase App 時才需要重新配置。
 
 ## 3. 开启 Authentication
 
@@ -72,16 +80,16 @@ npm install -g firebase-tools
 
 如果不想全局安装，也可以把后续命令里的 `firebase` 改成 `npx firebase-tools`。
 
-如果本机 Node 是 24，Firebase CLI 请求 Google API 可能会出现 TLS 连接中断。这个项目已验证可用的临时写法是：
+如果需要以與後端一致的 Node.js 22 執行 Firebase CLI，可使用：
 
 ```bash
-npx -p node@20 -p firebase-tools firebase projects:list
+npx -p node@22 -p firebase-tools firebase projects:list
 ```
 
 后续所有 `firebase ...` 命令都可以替换成：
 
 ```bash
-npx -p node@20 -p firebase-tools firebase ...
+npx -p node@22 -p firebase-tools firebase ...
 ```
 
 安装后，在项目根目录登录并绑定项目：
@@ -99,13 +107,26 @@ firebase use --add
 firebase functions:secrets:set GEMINI_API_KEY
 ```
 
-如果你使用 Node 20 临时写法：
+如果你使用 Node.js 22 临时写法：
 
 ```bash
-npx -p node@20 -p firebase-tools firebase functions:secrets:set GEMINI_API_KEY --project luffy-focus
+npx -p node@22 -p firebase-tools firebase functions:secrets:set GEMINI_API_KEY --project luffy-focus
 ```
 
 ## 7. 安装和部署 Functions
+
+本次只更新生圖功能時，先驗證，再限定部署三個函式。其餘既有函式不會在這次發布中升級 runtime：
+
+```bash
+cd functions
+npm ci
+npm test
+npm run lint
+cd ..
+firebase deploy --only functions:generatePetAvatar,functions:generatePetAvatarStates,functions:repairPetAvatarStates --project luffy-focus
+```
+
+需要發布全部後端或規則時，再依對應變更選擇以下部署指令：
 
 ```bash
 cd functions
@@ -117,8 +138,8 @@ firebase deploy --only functions,firestore:rules,storage
 建议分开部署，方便定位问题：
 
 ```bash
-npx -p node@20 -p firebase-tools firebase deploy --only firestore:rules,storage --project luffy-focus
-npx -p node@20 -p firebase-tools firebase deploy --only functions --project luffy-focus
+npx -p node@22 -p firebase-tools firebase deploy --only firestore:rules,storage --project luffy-focus
+npx -p node@22 -p firebase-tools firebase deploy --only functions --project luffy-focus
 ```
 
 ## 8. 本地 Flutter 依赖

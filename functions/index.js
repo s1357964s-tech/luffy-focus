@@ -11,7 +11,7 @@ const db = admin.firestore();
 const bucket = admin.storage().bucket();
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
-const GEMINI_IMAGE_MODEL = 'gemini-3-pro-image-preview';
+const GEMINI_IMAGE_MODEL = 'gemini-3-pro-image';
 const AVATAR_BACKGROUND_COLOR = '#FDF6E3';
 const CUSTOM_PET_PRODUCT_ID = 'luffy.custom_pet.create.v1';
 const CUSTOM_PET_CREDIT_DOC_ID = 'custom_pet_create';
@@ -211,14 +211,21 @@ async function callGeminiImage({ apiKey, imageBase64, imageMimeType, prompt }) {
   for (const part of parts) {
     const inlineData = part.inlineData || part.inline_data;
     if (inlineData?.data) {
-      return Buffer.from(inlineData.data, 'base64');
+      const contentType = inlineData.mimeType || inlineData.mime_type;
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+        throw new HttpsError('internal', 'Gemini returned an unsupported image format.');
+      }
+      return {
+        bytes: Buffer.from(inlineData.data, 'base64'),
+        contentType,
+      };
     }
   }
 
   throw new HttpsError('internal', 'Gemini did not return an image.');
 }
 
-async function uploadPublicImage(path, bytes, contentType = 'image/png') {
+async function uploadPublicImage(path, bytes, contentType) {
   const token = randomUUID();
   const file = bucket.file(path);
 
@@ -303,7 +310,7 @@ async function repairImageInputForPet({
   }
 }
 
-function originalImageExtension(imageMimeType) {
+function imageExtension(imageMimeType) {
   switch (imageMimeType) {
     case 'image/png':
       return 'png';
@@ -584,15 +591,16 @@ async function generateAndUploadAvatarState({
     state,
     imageMimeType,
   });
-  const bytes = await callGeminiImage({ apiKey, imageBase64, imageMimeType, prompt });
+  const { bytes, contentType } = await callGeminiImage({ apiKey, imageBase64, imageMimeType, prompt });
   const generatedMs = Date.now() - startedAt;
-  const path = `users/${uid}/pets/${petId}/${state}.png`;
-  const url = await uploadPublicImage(path, bytes);
+  const path = `users/${uid}/pets/${petId}/${state}.${imageExtension(contentType)}`;
+  const url = await uploadPublicImage(path, bytes, contentType);
   logger.info('Pet avatar state generation finished', {
     uid,
     petId,
     state,
     bytes: bytes.length,
+    contentType,
     generatedMs,
     totalMs: Date.now() - startedAt,
     path,
@@ -710,7 +718,7 @@ exports.generatePetAvatar = onCall(
       const originalUploadPromise = originalImagePath
         ? Promise.resolve(originalImagePath)
         : uploadPrivateImage(
-          `users/${uid}/pets/${petId}/original.${originalImageExtension(imageMimeType)}`,
+          `users/${uid}/pets/${petId}/original.${imageExtension(imageMimeType)}`,
           Buffer.from(imageBase64, 'base64'),
           imageMimeType,
         );

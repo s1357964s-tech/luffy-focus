@@ -3,11 +3,12 @@
   "description": "Firebase Functions for Luffy Focus pet generation",
   "private": true,
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "index.js",
   "scripts": {
     "lint": "node --check index.js",
+    "test": "node --test",
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions"
   },
