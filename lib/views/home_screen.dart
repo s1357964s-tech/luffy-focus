@@ -1005,9 +1005,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: AppConstants.primaryButtonColor.withOpacity(0.08),
+        color: AppConstants.primaryButtonColor.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppConstants.primaryButtonColor.withOpacity(0.2)),
+        border: Border.all(color: AppConstants.primaryButtonColor.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
@@ -1031,7 +1031,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   '開啟通知以便在專注中退至後台時接收提醒與叫聲',
                   style: TextStyle(
                     fontSize: 12,
-                    color: AppConstants.primaryTextColor.withOpacity(0.7),
+                    color: AppConstants.primaryTextColor.withValues(alpha: 0.7),
                   ),
                 ),
               ],
@@ -1062,7 +1062,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.blue.shade50.withOpacity(0.5),
+        color: Colors.blue.shade50.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.blue.shade100),
       ),
@@ -1088,7 +1088,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   '點擊查看新功能並前往 App Store 升級',
                   style: TextStyle(
                     fontSize: 12,
-                    color: AppConstants.primaryTextColor.withOpacity(0.7),
+                    color: AppConstants.primaryTextColor.withValues(alpha: 0.7),
                   ),
                 ),
               ],
@@ -1156,57 +1156,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-    );
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// 更新日誌特色項目元件
-// ──────────────────────────────────────────────────────────────────────────
-
-class _FeatureItem extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String desc;
-
-  const _FeatureItem({
-    required this.icon,
-    required this.title,
-    required this.desc,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20, color: AppConstants.primaryTextColor.withOpacity(0.8)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: AppConstants.primaryTextColor,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                desc,
-                style: TextStyle(
-                  fontSize: 12,
-                  height: 1.4,
-                  color: AppConstants.primaryTextColor.withOpacity(0.7),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

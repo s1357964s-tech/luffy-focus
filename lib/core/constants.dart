@@ -35,5 +35,5 @@ class AppConstants {
   static const int defaultTimerSeconds = 25 * 60;
 
   // App 版本號
-  static const String appVersion = '1.1.0';
+  static const String appVersion = '1.1.1';
 }
