@@ -916,33 +916,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      '修正內購付款結果確認',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppConstants.primaryTextColor),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 18),
-              Row(
-                children: [
-                  Icon(Icons.pets_rounded, color: AppConstants.primaryButtonColor, size: 20),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '付款驗證失敗可重新確認',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppConstants.primaryTextColor),
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 18),
-              Row(
-                children: [
-                  Icon(Icons.pets_rounded, color: AppConstants.primaryButtonColor, size: 20),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      '優化寵物生成與名額保護',
+                      '修復了一些問題',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppConstants.primaryTextColor),
                     ),
                   ),
