@@ -897,7 +897,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Icon(Icons.pets_rounded, color: AppConstants.primaryButtonColor, size: 28),
             SizedBox(width: 8),
             Text(
-              '版本更新說明 v1.1.0',
+              '版本更新說明 v${AppConstants.appVersion}',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: AppConstants.primaryTextColor,
@@ -916,7 +916,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      '自定義寵物生成',
+                      '修正內購付款結果確認',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppConstants.primaryTextColor),
                     ),
                   ),
@@ -929,7 +929,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      '專注完成歡呼聲',
+                      '付款驗證失敗可重新確認',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppConstants.primaryTextColor),
                     ),
                   ),
@@ -942,7 +942,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      '專注時跳出應用會有提示音',
+                      '優化寵物生成與名額保護',
                       style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppConstants.primaryTextColor),
                     ),
                   ),
